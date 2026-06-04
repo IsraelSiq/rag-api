@@ -1,41 +1,43 @@
 # rag-api
 
-REST API para o **Ragnarok Online Skill Simulator** — CRUD completo de classes e skills com Swagger UI.
+REST API para o **Ragnarok Online Skill Simulator** — CRUD completo de classes e skills.
 
 ## Stack
 
-- **Fastify** — servidor HTTP
-- **@fastify/swagger** + **@fastify/swagger-ui** — documentação interativa
-- **Supabase** (PostgreSQL) — banco de dados
+- **Vercel Functions** (serverless, TypeScript)
+- **Supabase** (PostgreSQL)
 - **Zod** — validação de schemas
-- **TypeScript**
-
-## Setup
-
-```bash
-npm install
-cp .env.example .env   # preencha SUPABASE_URL e SUPABASE_ANON_KEY
-npm run dev
-```
-
-Abra http://localhost:3333/docs para ver o Swagger UI.
+- **Swagger UI** — documentação interativa
 
 ## Endpoints
 
-### Jobs
 | Method | Path | Descrição |
 |---|---|---|
-| GET | /jobs | Listar todas as classes |
-| GET | /jobs/:id | Buscar classe por ID |
-| POST | /jobs | Criar nova classe |
-| PUT | /jobs/:id | Atualizar classe |
-| DELETE | /jobs/:id | Remover classe |
+| GET | /api/jobs | Listar classes (`?tier=` `?expanded=`) |
+| GET | /api/jobs/:id | Buscar classe |
+| POST | /api/jobs | Criar classe |
+| PUT | /api/jobs/:id | Atualizar classe |
+| DELETE | /api/jobs/:id | Remover classe |
+| GET | /api/skills | Listar skills (`?job_id=` `?type=`) |
+| GET | /api/skills/:id | Buscar skill |
+| POST | /api/skills | Criar skill |
+| PUT | /api/skills/:id | Atualizar skill |
+| DELETE | /api/skills/:id | Remover skill |
+| GET | /api/docs | OpenAPI spec (JSON) |
+| GET | /api/swagger | Swagger UI |
 
-### Skills
-| Method | Path | Descrição |
-|---|---|---|
-| GET | /skills | Listar todas as skills (query: `?job_id=`) |
-| GET | /skills/:id | Buscar skill por ID |
-| POST | /skills | Criar nova skill |
-| PUT | /skills/:id | Atualizar skill |
-| DELETE | /skills/:id | Remover skill |
+## Deploy no Vercel
+
+1. Importe o repo em [vercel.com/new](https://vercel.com/new)
+2. Adicione as variáveis de ambiente:
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
+3. Deploy automático ✅
+
+## Dev local
+
+```bash
+npm install
+cp .env.example .env   # preencha as chaves do Supabase
+npm run dev            # inicia em http://localhost:3000
+```
