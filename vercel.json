@@ -1,5 +1,4 @@
 {
-  "outputDirectory": ".",
   "buildCommand": "npm run build",
   "rewrites": [
     { "source": "/api/jobs/:id", "destination": "/api/jobs/[id]" },
