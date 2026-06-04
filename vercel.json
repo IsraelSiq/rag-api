@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/*.ts": {
+      "runtime": "@vercel/node@3.2.7"
+    }
+  },
   "rewrites": [
     { "source": "/api/jobs/:id", "destination": "/api/job?id=:id" },
     { "source": "/api/skills/:id", "destination": "/api/skill?id=:id" }
