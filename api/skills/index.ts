@@ -23,7 +23,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'POST') {
       const parsed = SkillCreateSchema.safeParse(req.body)
       if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() })
-      const { data, error } = await supabase.from('skills').insert(parsed.data).select().single()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await supabase.from('skills').insert(parsed.data as any).select().single()
       if (error) return res.status(409).json({ error: error.message })
       return res.status(201).json(data)
     }
