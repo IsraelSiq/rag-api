@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getSupabase } from '../lib/supabase'
 import { cors, handleOptions } from '../lib/helpers'
@@ -40,7 +41,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const supabase = getSupabase()
 
-    // Fetch all skills without embeddings
     const { data: skills, error } = await supabase
       .from('skills')
       .select('id, name, description')

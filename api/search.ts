@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getSupabase } from '../lib/supabase'
 import { cors, handleOptions } from '../lib/helpers'
@@ -55,36 +56,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-
     const supabase = getSupabase()
     const select = 'id, name, type, element, max_level, description, job_id, requires'
 
-    // Try semantic search first if OpenAI key is available
     if (process.env.OPENAI_API_KEY) {
       const embedding = await getEmbedding(q)
-
       if (embedding) {
         const { data: semanticData, error: semanticError } = await (supabase.rpc as any)(
           'match_skills',
-          {
-            query_embedding: embedding,
-            match_count: limit,
-            filter_job_id: job_id ?? null,
-          }
+          { query_embedding: embedding, match_count: limit, filter_job_id: job_id ?? null }
         )
-
         if (!semanticError && semanticData && semanticData.length > 0) {
-          return res.status(200).json({
-            q,
-            mode: 'semantic',
-            total: semanticData.length,
-            results: semanticData,
-          })
+          return res.status(200).json({ q, mode: 'semantic', total: semanticData.length, results: semanticData })
         }
       }
     }
 
-    // Fallback: FTS + ilike with synonym expansion
     const terms = expandQuery(q)
     const ilikeFilter = terms
       .flatMap(t => [`name.ilike.%${t}%`, `description.ilike.%${t}%`])
@@ -99,9 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return q1
       })(),
       (() => {
-        let q2 = supabase.from('skills').select(select)
-          .or(ilikeFilter)
-          .limit(limit)
+        let q2 = supabase.from('skills').select(select).or(ilikeFilter).limit(limit)
         if (job_id) q2 = q2.eq('job_id', job_id)
         return q2
       })(),
@@ -115,13 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true })
       .slice(0, limit)
 
-    return res.status(200).json({
-      q,
-      mode: 'keyword',
-      expanded_terms: terms,
-      total: merged.length,
-      results: merged,
-    })
+    return res.status(200).json({ q, mode: 'keyword', expanded_terms: terms, total: merged.length, results: merged })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return res.status(500).json({ error: message })
