@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { createClient } from '@supabase/supabase-js'
+import { getSupabase } from '../lib/supabase'
 import { cors, handleOptions } from '../lib/helpers'
 
 type SkillRequire = { skillId: string; level: number }
@@ -312,25 +312,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: 'Unauthorized. Provide x-seed-secret header.' })
   }
 
-  const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_ANON_KEY
+  try {
+    const supabase = getSupabase()
 
-  if (!url || !key) {
-    return res.status(500).json({ error: 'Missing Supabase env vars.' })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error, count } = await supabase
+      .from('skills')
+      .upsert(skills as any[], { onConflict: 'id', count: 'exact' })
+
+    if (error) {
+      return res.status(500).json({ error: error.message })
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: `Seed concluído! ${count ?? skills.length} skills inseridas/atualizadas.`,
+    })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return res.status(500).json({ error: message })
   }
-
-  const supabase = createClient(url, key)
-
-  const { error, count } = await supabase
-    .from('skills')
-    .upsert(skills, { onConflict: 'id', count: 'exact' })
-
-  if (error) {
-    return res.status(500).json({ error: error.message })
-  }
-
-  return res.status(200).json({
-    ok: true,
-    message: `Seed concluído! ${count ?? skills.length} skills inseridas/atualizadas.`,
-  })
 }
