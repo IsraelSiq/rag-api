@@ -1,17 +1,95 @@
 import { createClient } from '@supabase/supabase-js'
 
-let _client: ReturnType<typeof createClient> | null = null
+// Minimal inline DB types — enough to satisfy TypeScript without codegen
+export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
+
+export type Database = {
+  public: {
+    Tables: {
+      skills: {
+        Row: {
+          id: string
+          name: string
+          type: 'active' | 'passive' | 'toggle'
+          element: string | null
+          max_level: number
+          description: string
+          job_id: string
+          requires: Json
+          fts: unknown
+          embedding: unknown
+        }
+        Insert: {
+          id: string
+          name: string
+          type: 'active' | 'passive' | 'toggle'
+          element?: string | null
+          max_level: number
+          description: string
+          job_id: string
+          requires?: Json
+          embedding?: unknown
+        }
+        Update: {
+          id?: string
+          name?: string
+          type?: 'active' | 'passive' | 'toggle'
+          element?: string | null
+          max_level?: number
+          description?: string
+          job_id?: string
+          requires?: Json
+          embedding?: unknown
+        }
+      }
+      jobs: {
+        Row: {
+          id: string
+          name: string
+          tier: number
+          parent_id: string | null
+          skill_points: number
+          icon: string | null
+          expanded: boolean
+        }
+        Insert: {
+          id: string
+          name: string
+          tier: number
+          parent_id?: string | null
+          skill_points: number
+          icon?: string | null
+          expanded?: boolean
+        }
+        Update: {
+          id?: string
+          name?: string
+          tier?: number
+          parent_id?: string | null
+          skill_points?: number
+          icon?: string | null
+          expanded?: boolean
+        }
+      }
+    }
+    Views: Record<string, never>
+    Functions: Record<string, never>
+    Enums: Record<string, never>
+  }
+}
+
+let _client: ReturnType<typeof createClient<Database>> | null = null
 
 export function getSupabase() {
   if (_client) return _client
   const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_ANON_KEY
+  const key = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_ANON_KEY
   if (!url || !key) {
     throw new Error(
-      `Missing env vars — SUPABASE_URL: ${url ? 'ok' : 'MISSING'}, SUPABASE_ANON_KEY: ${key ? 'ok' : 'MISSING'}`
+      `Missing env vars — SUPABASE_URL: ${url ? 'ok' : 'MISSING'}, key: ${key ? 'ok' : 'MISSING'}`
     )
   }
-  _client = createClient(url, key, {
+  _client = createClient<Database>(url, key, {
     global: { fetch: fetch.bind(globalThis) },
     realtime: {
       transport: class DummyWS {
