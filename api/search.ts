@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getSupabase } from '../lib/supabase'
 import { cors, handleOptions } from '../lib/helpers'
@@ -32,7 +31,7 @@ async function getEmbedding(text: string): Promise<number[] | null> {
       body: JSON.stringify({ model: 'text-embedding-3-small', input: text }),
     })
     if (!res.ok) return null
-    const json = await res.json()
+    const json = await res.json() as { data: { embedding: number[] }[] }
     return json.data[0].embedding
   } catch {
     return null
@@ -47,8 +46,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed. Use GET.' })
   }
 
-  const q = (req.query.q as string ?? '').trim()
+  const q = ((req.query.q as string) ?? '').trim()
   const limit = Math.min(Number(req.query.limit ?? 10), 50)
+  const threshold = Number(req.query.threshold ?? 0.3)
   const job_id = req.query.job_id as string | undefined
 
   if (!q) {
@@ -59,19 +59,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = getSupabase()
     const select = 'id, name, type, element, max_level, description, job_id, requires'
 
+    // --- Semantic search via pgvector ---
     if (process.env.OPENAI_API_KEY) {
       const embedding = await getEmbedding(q)
       if (embedding) {
-        const { data: semanticData, error: semanticError } = await (supabase.rpc as any)(
+        const { data: semanticData, error: semanticError } = await supabase.rpc(
           'match_skills',
-          { query_embedding: embedding, match_count: limit, filter_job_id: job_id ?? null }
+          {
+            query_embedding: embedding,
+            match_count: limit,
+            match_threshold: threshold,
+            filter_job_id: job_id ?? null,
+          }
         )
         if (!semanticError && semanticData && semanticData.length > 0) {
-          return res.status(200).json({ q, mode: 'semantic', total: semanticData.length, results: semanticData })
+          return res.status(200).json({
+            q,
+            mode: 'semantic',
+            total: semanticData.length,
+            results: semanticData,
+          })
         }
       }
     }
 
+    // --- Fallback: keyword + FTS ---
     const terms = expandQuery(q)
     const ilikeFilter = terms
       .flatMap(t => [`name.ilike.%${t}%`, `description.ilike.%${t}%`])
@@ -100,7 +112,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true })
       .slice(0, limit)
 
-    return res.status(200).json({ q, mode: 'keyword', expanded_terms: terms, total: merged.length, results: merged })
+    return res.status(200).json({
+      q,
+      mode: 'keyword',
+      expanded_terms: terms,
+      total: merged.length,
+      results: merged,
+    })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return res.status(500).json({ error: message })
