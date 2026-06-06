@@ -1,8 +1,16 @@
 {
   "functions": {
-    "api/**/*.ts": {
-      "runtime": "@vercel/node@3.2.7"
-    }
+    "api/jobs/index.ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/jobs/[id].ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/skills/index.ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/skills/[id].ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/seed.ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/docs.ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/swagger.ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/job.ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/jobs.ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/skill.ts": { "runtime": "@vercel/node@3.2.7" },
+    "api/skills.ts": { "runtime": "@vercel/node@3.2.7" }
   },
   "rewrites": [
     { "source": "/api/jobs/:id", "destination": "/api/jobs/[id]?id=:id" },
