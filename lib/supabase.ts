@@ -3,6 +3,18 @@ import { createClient } from '@supabase/supabase-js'
 // Minimal inline DB types — enough to satisfy TypeScript without codegen
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
 
+export type MatchSkillsRow = {
+  id: string
+  name: string
+  type: 'active' | 'passive' | 'toggle'
+  element: string | null
+  max_level: number
+  description: string
+  job_id: string
+  requires: Json
+  similarity: number
+}
+
 export type Database = {
   public: {
     Tables: {
@@ -73,7 +85,17 @@ export type Database = {
       }
     }
     Views: Record<string, never>
-    Functions: Record<string, never>
+    Functions: {
+      match_skills: {
+        Args: {
+          query_embedding: number[]
+          match_count: number
+          match_threshold?: number
+          filter_job_id?: string | null
+        }
+        Returns: MatchSkillsRow[]
+      }
+    }
     Enums: Record<string, never>
   }
 }
