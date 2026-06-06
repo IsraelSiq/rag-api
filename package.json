@@ -6,8 +6,7 @@
     "node": "20.x"
   },
   "scripts": {
-    "dev": "vercel dev",
-    "seed": "npx ts-node --esm src/seed.ts"
+    "dev": "vercel dev"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.4",
@@ -15,8 +14,6 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "@vercel/node": "^3.2.7",
-    "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   }
 }
