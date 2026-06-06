@@ -11,6 +11,9 @@ export function getSupabase() {
       `Missing env vars — SUPABASE_URL: ${url ? 'ok' : 'MISSING'}, SUPABASE_ANON_KEY: ${key ? 'ok' : 'MISSING'}`
     )
   }
-  _client = createClient(url, key)
+  _client = createClient(url, key, {
+    realtime: { params: { eventsPerSecond: -1 } },
+    global: { fetch: fetch.bind(globalThis) },
+  })
   return _client
 }
