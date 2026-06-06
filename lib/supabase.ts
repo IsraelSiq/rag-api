@@ -12,8 +12,13 @@ export function getSupabase() {
     )
   }
   _client = createClient(url, key, {
-    realtime: { params: { eventsPerSecond: -1 } },
     global: { fetch: fetch.bind(globalThis) },
+    realtime: {
+      transport: class DummyWS {
+        constructor() { /* noop */ }
+        close() { /* noop */ }
+      } as unknown as typeof WebSocket,
+    },
   })
   return _client
 }
