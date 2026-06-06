@@ -20,43 +20,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const supabase = getSupabase()
+    const select = 'id, name, type, element, max_level, description, job_id, requires'
 
-    // Primary: full-text search (simple config = no aggressive stemming)
-    let ftsQuery = supabase
-      .from('skills')
-      .select('id, name, type, element, max_level, description, job_id, requires')
-      .textSearch('fts', q, { type: 'plain', config: 'simple' })
-      .limit(limit)
+    // Run FTS and ilike in parallel
+    const [ftsRes, ilikeRes] = await Promise.all([
+      (() => {
+        let q1 = supabase
+          .from('skills')
+          .select(select)
+          .textSearch('fts', q, { type: 'plain', config: 'simple' })
+          .limit(limit)
+        if (job_id) q1 = q1.eq('job_id', job_id)
+        return q1
+      })(),
+      (() => {
+        const pattern = `%${q}%`
+        let q2 = supabase
+          .from('skills')
+          .select(select)
+          .or(`name.ilike.${pattern},description.ilike.${pattern}`)
+          .limit(limit)
+        if (job_id) q2 = q2.eq('job_id', job_id)
+        return q2
+      })(),
+    ])
 
-    if (job_id) ftsQuery = ftsQuery.eq('job_id', job_id)
+    if (ftsRes.error) return res.status(500).json({ error: ftsRes.error.message })
+    if (ilikeRes.error) return res.status(500).json({ error: ilikeRes.error.message })
 
-    const { data: ftsData, error: ftsError } = await ftsQuery
-
-    if (ftsError) {
-      return res.status(500).json({ error: ftsError.message })
-    }
-
-    // Fallback: ilike search on name + description when FTS returns nothing
-    let results = ftsData ?? []
-    if (results.length === 0) {
-      const pattern = `%${q}%`
-      let ilikeQuery = supabase
-        .from('skills')
-        .select('id, name, type, element, max_level, description, job_id, requires')
-        .or(`name.ilike.${pattern},description.ilike.${pattern}`)
-        .limit(limit)
-
-      if (job_id) ilikeQuery = ilikeQuery.eq('job_id', job_id)
-
-      const { data: ilikeData, error: ilikeError } = await ilikeQuery
-      if (ilikeError) return res.status(500).json({ error: ilikeError.message })
-      results = ilikeData ?? []
-    }
+    // Merge and deduplicate by id, preserving order (FTS first)
+    const seen = new Set<string>()
+    const merged = [...(ftsRes.data ?? []), ...(ilikeRes.data ?? [])].filter(s => {
+      if (seen.has(s.id)) return false
+      seen.add(s.id)
+      return true
+    }).slice(0, limit)
 
     return res.status(200).json({
       q,
-      total: results.length,
-      results,
+      total: merged.length,
+      results: merged,
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
