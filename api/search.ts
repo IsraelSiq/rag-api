@@ -21,26 +21,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const supabase = getSupabase()
 
-    let query = supabase
+    // Primary: full-text search (simple config = no aggressive stemming)
+    let ftsQuery = supabase
       .from('skills')
       .select('id, name, type, element, max_level, description, job_id, requires')
-      .textSearch('fts', q, { type: 'plain', config: 'portuguese' })
+      .textSearch('fts', q, { type: 'plain', config: 'simple' })
       .limit(limit)
 
-    if (job_id) {
-      query = query.eq('job_id', job_id)
+    if (job_id) ftsQuery = ftsQuery.eq('job_id', job_id)
+
+    const { data: ftsData, error: ftsError } = await ftsQuery
+
+    if (ftsError) {
+      return res.status(500).json({ error: ftsError.message })
     }
 
-    const { data, error } = await query
+    // Fallback: ilike search on name + description when FTS returns nothing
+    let results = ftsData ?? []
+    if (results.length === 0) {
+      const pattern = `%${q}%`
+      let ilikeQuery = supabase
+        .from('skills')
+        .select('id, name, type, element, max_level, description, job_id, requires')
+        .or(`name.ilike.${pattern},description.ilike.${pattern}`)
+        .limit(limit)
 
-    if (error) {
-      return res.status(500).json({ error: error.message })
+      if (job_id) ilikeQuery = ilikeQuery.eq('job_id', job_id)
+
+      const { data: ilikeData, error: ilikeError } = await ilikeQuery
+      if (ilikeError) return res.status(500).json({ error: ilikeError.message })
+      results = ilikeData ?? []
     }
 
     return res.status(200).json({
       q,
-      total: data.length,
-      results: data,
+      total: results.length,
+      results,
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
