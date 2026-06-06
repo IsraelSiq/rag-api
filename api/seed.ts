@@ -315,10 +315,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const supabase = getSupabase()
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // Normalize: ensure requires is always [] and not undefined/null
+    const normalized = skills.map(s => ({ ...s, requires: s.requires ?? [] }))
+
     const { error, count } = await supabase
       .from('skills')
-      .upsert(skills as any[], { onConflict: 'id', count: 'exact' })
+      .upsert(normalized as any[], { onConflict: 'id', count: 'exact' })
 
     if (error) {
       return res.status(500).json({ error: error.message })
