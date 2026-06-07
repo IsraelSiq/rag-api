@@ -99,9 +99,12 @@ export type Database = {
   }
 }
 
-let _client: ReturnType<typeof createClient<Database>> | null = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SupabaseClientType = ReturnType<typeof createClient<Database>>
 
-export function getSupabase() {
+let _client: SupabaseClientType | null = null
+
+export function getSupabase(): SupabaseClientType {
   if (_client) return _client
   const url = process.env.SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_ANON_KEY
@@ -110,14 +113,6 @@ export function getSupabase() {
       `Missing env vars — SUPABASE_URL: ${url ? 'ok' : 'MISSING'}, key: ${key ? 'ok' : 'MISSING'}`
     )
   }
-  _client = createClient<Database>(url, key, {
-    global: { fetch: fetch.bind(globalThis) },
-    realtime: {
-      transport: class DummyWS {
-        constructor() {}
-        close() {}
-      } as unknown as typeof WebSocket,
-    },
-  })
+  _client = createClient<Database>(url, key)
   return _client
 }
