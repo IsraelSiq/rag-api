@@ -1,8 +1,4 @@
 {
-  "rewrites": [
-    { "source": "/api/jobs/:id", "destination": "/api/jobs/[id]?id=:id" },
-    { "source": "/api/skills/:id", "destination": "/api/skills/[id]?id=:id" }
-  ],
   "headers": [
     {
       "source": "/api/(.*)",

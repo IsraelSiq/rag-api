@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getSupabase } from '../../lib/supabase'
 import { JobUpdateSchema } from '../../lib/schemas'
@@ -7,7 +6,9 @@ import { cors, handleOptions } from '../../lib/helpers'
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   cors(res)
   if (handleOptions(req, res)) return
-  const { id } = req.query as { id: string }
+  const id = req.query.id as string
+
+  if (!id) return res.status(400).json({ error: 'Missing id' })
 
   try {
     const supabase = getSupabase()

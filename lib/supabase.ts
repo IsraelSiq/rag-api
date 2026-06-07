@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Minimal inline DB types — enough to satisfy TypeScript without codegen
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[]
 
 export type MatchSkillsRow = {
@@ -115,8 +114,8 @@ export function getSupabase() {
     global: { fetch: fetch.bind(globalThis) },
     realtime: {
       transport: class DummyWS {
-        constructor() { /* noop */ }
-        close() { /* noop */ }
+        constructor() {}
+        close() {}
       } as unknown as typeof WebSocket,
     },
   })
