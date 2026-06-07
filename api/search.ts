@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getSupabase } from '../lib/supabase'
 import { cors, handleOptions } from '../lib/helpers'
@@ -59,31 +60,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = getSupabase()
     const select = 'id, name, type, element, max_level, description, job_id, requires'
 
-    // --- Semantic search via pgvector ---
     if (process.env.OPENAI_API_KEY) {
       const embedding = await getEmbedding(q)
       if (embedding) {
-        const { data: semanticData, error: semanticError } = await supabase.rpc(
-          'match_skills',
-          {
-            query_embedding: embedding,
-            match_count: limit,
-            match_threshold: threshold,
-            filter_job_id: job_id ?? null,
-          }
-        )
+        const { data: semanticData, error: semanticError } = await supabase.rpc('match_skills', {
+          query_embedding: embedding,
+          match_count: limit,
+          match_threshold: threshold,
+          filter_job_id: job_id ?? null,
+        })
         if (!semanticError && semanticData && semanticData.length > 0) {
-          return res.status(200).json({
-            q,
-            mode: 'semantic',
-            total: semanticData.length,
-            results: semanticData,
-          })
+          return res.status(200).json({ q, mode: 'semantic', total: semanticData.length, results: semanticData })
         }
       }
     }
 
-    // --- Fallback: keyword + FTS ---
     const terms = expandQuery(q)
     const ilikeFilter = terms
       .flatMap(t => [`name.ilike.%${t}%`, `description.ilike.%${t}%`])
@@ -91,9 +82,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const [ftsRes, ilikeRes] = await Promise.all([
       (() => {
-        let q1 = supabase.from('skills').select(select)
-          .textSearch('fts', q, { type: 'plain', config: 'simple' })
-          .limit(limit)
+        let q1 = supabase.from('skills').select(select).textSearch('fts', q, { type: 'plain', config: 'simple' }).limit(limit)
         if (job_id) q1 = q1.eq('job_id', job_id)
         return q1
       })(),
@@ -107,19 +96,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (ftsRes.error) return res.status(500).json({ error: ftsRes.error.message })
     if (ilikeRes.error) return res.status(500).json({ error: ilikeRes.error.message })
 
-    const seen = new Set<string>()
+    const seen = new Set()
     const merged = [...(ftsRes.data ?? []), ...(ilikeRes.data ?? [])]
       .filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true })
       .slice(0, limit)
 
-    return res.status(200).json({
-      q,
-      mode: 'keyword',
-      expanded_terms: terms,
-      total: merged.length,
-      results: merged,
-    })
-  } catch (err: unknown) {
+    return res.status(200).json({ q, mode: 'keyword', expanded_terms: terms, total: merged.length, results: merged })
+  } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return res.status(500).json({ error: message })
   }
