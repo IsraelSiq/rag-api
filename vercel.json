@@ -1,4 +1,16 @@
 {
+  "rewrites": [
+    { "source": "/api/health", "destination": "/api/health" },
+    { "source": "/api/jobs", "destination": "/api/jobs" },
+    { "source": "/api/jobs/:id", "destination": "/api/jobs/:id" },
+    { "source": "/api/skills", "destination": "/api/skills" },
+    { "source": "/api/skills/:id", "destination": "/api/skills/:id" },
+    { "source": "/api/search", "destination": "/api/search" },
+    { "source": "/api/embed", "destination": "/api/embed" },
+    { "source": "/api/seed", "destination": "/api/seed" },
+    { "source": "/api/docs", "destination": "/api/docs" },
+    { "source": "/api/swagger", "destination": "/api/swagger" }
+  ],
   "headers": [
     {
       "source": "/api/(.*)",
