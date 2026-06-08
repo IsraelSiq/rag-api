@@ -1,5 +1,13 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node'
+import http from 'http'
 
-export default function handler(_req: VercelRequest, res: VercelResponse) {
-  res.status(200).json({ status: 'ok', message: 'Use /api/* endpoints' })
-}
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify({ status: 'ok', message: 'Use /api/* endpoints' }))
+})
+
+const port = process.env.PORT || 3000
+server.listen(port, () => {
+  console.log(`Server running on port ${port}`)
+})
+
+export default server
