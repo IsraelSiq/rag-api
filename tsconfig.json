@@ -5,9 +5,8 @@
     "lib": ["ES2020"],
     "strict": false,
     "esModuleInterop": true,
-    "skipLibCheck": true,
-    "outDir": "dist"
+    "skipLibCheck": true
   },
   "include": ["api/**/*", "lib/**/*"],
-  "exclude": ["node_modules", "dist", "src"]
+  "exclude": ["node_modules", "src"]
 }
