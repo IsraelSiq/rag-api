@@ -24,6 +24,40 @@ const BASE = 'https://rpgherosaga.com'
 const DELAY_MS = 400
 const SHOP_CONCURRENCY = 5
 
+// Prefixos de 3 letras comuns em nomes de itens do jogo (PT-BR)
+// Cobre: letras latinas, acentuadas e combinações frequentes
+const SEARCH_TERMS = [
+  // Letras simples triplicadas (garante cobertura base)
+  ...('abcdefghijklmnopqrstuvwxyz'.split('').map(c => c + c + c)),
+  // Prefixos comuns em itens RO/Hero Saga
+  'arm', 'arc', 'arr', 'asa', 'ata', 'ate',
+  'bal', 'ban', 'bar', 'bas', 'bat', 'bau', 'bel', 'ber', 'bol', 'bon', 'bot', 'bra', 'bri', 'bro',
+  'cai', 'cal', 'cam', 'can', 'cap', 'car', 'cas', 'cav', 'cer', 'cha', 'chi', 'chu', 'cin', 'cir', 'cob', 'col', 'com', 'con', 'cor', 'cos', 'cou', 'cri', 'cro', 'cru',
+  'dar', 'dec', 'def', 'del', 'den', 'des', 'dia', 'dra', 'dro',
+  'ele', 'enc', 'ene', 'eng', 'enr', 'ens', 'ent', 'env', 'equ', 'esc', 'esp', 'est', 'eve',
+  'fad', 'fan', 'far', 'fei', 'fer', 'fla', 'fle', 'flo', 'for', 'fra', 'fri', 'fro', 'fun',
+  'gal', 'gem', 'ger', 'gla', 'glo', 'gol', 'gra', 'gri', 'gua', 'gue',
+  'hel', 'her', 'hom',
+  'ima', 'imp', 'inf', 'ins', 'int', 'inv',
+  'jad', 'jav', 'jon',
+  'lac', 'lam', 'lan', 'lap', 'lar', 'las', 'len', 'lio', 'lis', 'lit', 'lon',
+  'mac', 'mag', 'mal', 'man', 'mar', 'mas', 'med', 'mel', 'mes', 'met', 'moe', 'mol', 'mon', 'mor', 'mun',
+  'nac', 'nag', 'niv',
+  'ocu', 'old', 'oli', 'ore', 'ori',
+  'pac', 'pal', 'pan', 'par', 'pas', 'pat', 'ped', 'pen', 'per', 'pes', 'pie', 'pin', 'pla', 'poc', 'pol', 'por', 'pro',
+  'qui',
+  'rad', 'ram', 'rap', 'ras', 'rec', 'ref', 'rei', 'rel', 'rem', 'ren', 'res', 'rev', 'rin', 'rob', 'rod', 'ron', 'ros', 'rou', 'rub', 'run',
+  'sab', 'sal', 'san', 'sar', 'sec', 'sel', 'sem', 'sen', 'ser', 'sil', 'sim', 'sir', 'sob', 'sol', 'som', 'sor', 'sub', 'sul', 'sup',
+  'tab', 'tal', 'tam', 'tar', 'tec', 'tem', 'ten', 'ter', 'tim', 'tis', 'tit', 'tor', 'tot', 'tra', 'tre', 'tri', 'tro', 'tun',
+  'ult', 'uni', 'uns',
+  'val', 'van', 'var', 'vel', 'ven', 'ver', 'ves', 'via', 'vid', 'vis', 'vit', 'vol', 'vor',
+  'war', 'win',
+  'xan',
+  'zap', 'zel', 'zen', 'zon',
+  // Números e IDs
+  '100', '200', '300', '400', '500',
+]
+
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
@@ -57,14 +91,15 @@ function log(msg: string) {
 
 async function fetchItemIndex() {
   log('🔍 Buscando índice de itens...')
-  const terms = 'abcdefghijklmnopqrstuvwxyz0123456789'.split('')
   const seen = new Set<string>()
   const items: { id: string; name: string; is_costume: boolean }[] = []
+  const terms = [...new Set(SEARCH_TERMS)] // remove duplicatas
 
-  for (const term of terms) {
+  for (let i = 0; i < terms.length; i++) {
+    const term = terms[i]
     try {
       const res = await fetch(
-        `${BASE}/?module=vending&action=search&item_search=${term}`,
+        `${BASE}/?module=vending&action=search&item_search=${encodeURIComponent(term)}`,
         { headers: getHeaders() }
       )
       const json = await res.json() as { results?: any[] }
@@ -75,14 +110,14 @@ async function fetchItemIndex() {
           items.push({ id, name: item.name, is_costume: !!item.is_costume })
         }
       }
-      process.stdout.write(`  termo "${term}" → ${items.length} itens únicos\r`)
+      process.stdout.write(`  [${i + 1}/${terms.length}] "${term}" → ${items.length} itens únicos\r`)
     } catch (e) {
       log(`  ⚠️  Erro no termo "${term}": ${e}`)
     }
     await sleep(DELAY_MS)
   }
 
-  log(`\n✅ ${items.length} itens encontrados`)
+  log(`\n✅ ${items.length} itens únicos encontrados`)
   return items
 }
 
