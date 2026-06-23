@@ -4,6 +4,7 @@
  *
  * Varre IDs em paralelo, salva tudo que retornar da API.
  * Itens não encontrados (404) são silenciosamente ignorados.
+ * A coluna `translated` indica se o nome/descrição estão em texto legível (sem coreano/chinês).
  *
  * Uso:
  *   npx tsx scripts/seed-divine-pride.ts                  # varre 1 ~ 32000
@@ -23,13 +24,13 @@ dotenv.config()
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const DP_BASE   = 'https://www.divine-pride.net/api/database'
-const DP_SERVER = 'bRO'
-const ID_FROM   = 1
-const ID_TO     = 32000
-const CONCURRENCY = 10   // requisições paralelas
-const DELAY_MS    = 150  // delay entre batches (ms)
-const UPSERT_CHUNK = 100 // linhas por upsert
+const DP_BASE      = 'https://www.divine-pride.net/api/database'
+const DP_SERVER    = 'bRO'
+const ID_FROM      = 1
+const ID_TO        = 32000
+const CONCURRENCY  = 10
+const DELAY_MS     = 150
+const UPSERT_CHUNK = 100
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -40,6 +41,18 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 function log(msg: string) {
   process.stdout.write(`[${new Date().toISOString()}] ${msg}\n`)
+}
+
+// ─── Detecta se o texto é legível (sem CJK) ───────────────────────────────────
+
+// Blocos CJK: chinês, japonês, coreano
+const CJK_REGEX = /[\u1100-\u11FF\u2E80-\u2FFF\u3000-\u9FFF\uA000-\uA4FF\uAC00-\uD7FF\uF900-\uFAFF]/
+
+function isReadable(text: string | null | undefined): boolean {
+  if (!text || text.trim().length === 0) return false
+  const cjkCount = (text.match(new RegExp(CJK_REGEX.source, 'g')) ?? []).length
+  // Rejeita se mais de 15% dos caracteres forem CJK
+  return cjkCount / text.length < 0.15
 }
 
 // ─── Fetch single item ────────────────────────────────────────────────────────
@@ -53,7 +66,6 @@ async function fetchItem(id: number): Promise<any | null> {
     })
     if (res.status === 404) return null
     if (!res.ok) {
-      // Rate limit ou erro temporário — aguarda e tenta de novo
       if (res.status === 429 || res.status >= 500) {
         await sleep(2000)
         return fetchItem(id)
@@ -70,15 +82,23 @@ async function fetchItem(id: number): Promise<any | null> {
 // ─── Map DP response → schema da tabela items ──────────────────────────────────
 
 function mapItem(j: any) {
+  const name        = j.name ?? j.unidName ?? ''
+  const description = j.description ?? ''
+
+  // translated = true se nome E descrição forem legíveis
+  // (descrição vazia é aceitável — muitos consumibles não têm)
+  const translated = isReadable(name) && (description === '' || isReadable(description))
+
   return {
-    id:         String(j.id),
-    name:       j.name ?? j.unidName ?? '',
-    is_costume: false,
-    type:       j.typeId      ?? null,
-    sub_type:   j.subTypeId   ?? null,
-    weight:     j.weight      ?? null,
-    slots:      j.slots       ?? 0,
-    dp_data:    j,
+    id:          String(j.id),
+    name,
+    is_costume:  false,
+    type:        j.typeId    ?? null,
+    sub_type:    j.subTypeId ?? null,
+    weight:      j.weight    ?? null,
+    slots:       j.slots     ?? 0,
+    translated,
+    dp_data:     j,
   }
 }
 
@@ -107,20 +127,20 @@ async function main() {
     process.exit(1)
   }
 
-  // Parse args --from / --to
-  const args = process.argv.slice(2)
+  const args    = process.argv.slice(2)
   const fromIdx = args.indexOf('--from')
   const toIdx   = args.indexOf('--to')
-  const from = fromIdx !== -1 ? parseInt(args[fromIdx + 1]) : ID_FROM
-  const to   = toIdx   !== -1 ? parseInt(args[toIdx   + 1]) : ID_TO
+  const from    = fromIdx !== -1 ? parseInt(args[fromIdx + 1]) : ID_FROM
+  const to      = toIdx   !== -1 ? parseInt(args[toIdx   + 1]) : ID_TO
 
   const total = to - from + 1
   log(`🚀 Extraindo itens do Divine Pride: ID ${from} → ${to} (${total} IDs)`)
-  log(`   Concorrência: ${CONCURRENCY} | Delay: ${DELAY_MS}ms | Est. ${Math.ceil(total / CONCURRENCY * DELAY_MS / 1000 / 60)} min`)
+  log(`   Concorrência: ${CONCURRENCY} | Delay: ${DELAY_MS}ms | Est. ~${Math.ceil(total / CONCURRENCY * DELAY_MS / 1000 / 60)} min`)
 
-  let found    = 0
-  let notFound = 0
-  let buffer:  any[] = []
+  let found      = 0
+  let translated = 0
+  let notFound   = 0
+  let buffer: any[] = []
 
   for (let id = from; id <= to; id += CONCURRENCY) {
     const batch = Array.from(
@@ -130,28 +150,35 @@ async function main() {
     const results = await Promise.all(batch)
 
     for (const item of results) {
-      if (item) { buffer.push(item); found++ }
-      else notFound++
+      if (item) {
+        buffer.push(item)
+        found++
+        if (item.translated) translated++
+      } else {
+        notFound++
+      }
     }
 
-    // Faz upsert a cada 500 itens encontrados
     if (buffer.length >= 500) {
       await upsertBatch(buffer)
       buffer = []
     }
 
-    const done = id - from + CONCURRENCY
+    const done = Math.min(id - from + CONCURRENCY, total)
     process.stdout.write(
-      `  [${Math.min(done, total)}/${total}] encontrados: ${found} | não encontrados: ${notFound}\r`
+      `  [${done}/${total}] salvos: ${found} (✅ traduzidos: ${translated} | 🌐 sem tradução: ${found - translated}) | vazios: ${notFound}\r`
     )
 
     await sleep(DELAY_MS)
   }
 
-  // Flush restante
   if (buffer.length > 0) await upsertBatch(buffer)
 
-  log(`\n✅ Concluído! ${found} itens salvos, ${notFound} IDs vazios`)
+  log(`\n✅ Concluído!`)
+  log(`   Total salvo:      ${found}`)
+  log(`   Traduzidos:       ${translated}`)
+  log(`   Sem tradução:    ${found - translated}`)
+  log(`   IDs vazios (404): ${notFound}`)
   log(`🎉 Seed Divine Pride completo!`)
 }
 
