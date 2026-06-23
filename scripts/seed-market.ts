@@ -9,6 +9,7 @@
  * Variáveis de ambiente necessárias (.env):
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_KEY
+ *   HEROSAGA_COOKIE
  */
 
 import * as cheerio from 'cheerio'
@@ -20,18 +21,21 @@ dotenv.config()
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const BASE = 'https://rpgherosaga.com'
-const DELAY_MS = 400          // delay entre requests (ms)
-const SHOP_CONCURRENCY = 5    // lojas processadas em paralelo
+const DELAY_MS = 400
+const SHOP_CONCURRENCY = 5
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-const FETCH_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  'X-Requested-With': 'XMLHttpRequest',
-  'Accept': 'application/json',
+function getHeaders(accept: string = 'application/json') {
+  return {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Accept': accept,
+    'Cookie': process.env.HEROSAGA_COOKIE ?? '',
+  }
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -61,7 +65,7 @@ async function fetchItemIndex() {
     try {
       const res = await fetch(
         `${BASE}/?module=vending&action=search&item_search=${term}`,
-        { headers: FETCH_HEADERS }
+        { headers: getHeaders() }
       )
       const json = await res.json() as { results?: any[] }
       for (const item of json.results ?? []) {
@@ -94,7 +98,7 @@ async function fetchAllShops() {
     try {
       const res = await fetch(
         `${BASE}/?module=vending&action=filter&page=${page}&sort=id&order=asc`,
-        { headers: FETCH_HEADERS }
+        { headers: getHeaders() }
       )
       const json = await res.json() as { vendings?: any[]; pagination?: any }
       totalPages = json.pagination?.totalPages ?? 1
@@ -126,11 +130,11 @@ async function fetchAllShops() {
 
 // ─── STEP 3: Itens de uma loja ────────────────────────────────────────────────
 
-async function fetchShopItems(shopId: string, currency: string) {
+async function fetchShopItems(shopId: string) {
   try {
     const res = await fetch(
       `${BASE}/?module=vending&action=viewshop&id=${shopId}`,
-      { headers: { 'User-Agent': FETCH_HEADERS['User-Agent'], Accept: 'text/html' } }
+      { headers: getHeaders('text/html') }
     )
     const $ = cheerio.load(await res.text())
     const items: any[] = []
@@ -140,13 +144,13 @@ async function fetchShopItems(shopId: string, currency: string) {
       const itemId = cols.eq(0).text().trim()
       if (!itemId || !/^\d+$/.test(itemId)) return
 
-      const refinRaw  = cols.eq(2).text().trim()
-      const priceRaw  = cols.eq(9).text().trim()
-      const slot1     = cols.eq(4).text().trim()
-      const slot2     = cols.eq(5).text().trim()
-      const slot3     = cols.eq(6).text().trim()
-      const slot4     = cols.eq(7).text().trim()
-      const randOpts  = cols.eq(8).text().trim()
+      const refinRaw = cols.eq(2).text().trim()
+      const priceRaw = cols.eq(9).text().trim()
+      const slot1    = cols.eq(4).text().trim()
+      const slot2    = cols.eq(5).text().trim()
+      const slot3    = cols.eq(6).text().trim()
+      const slot4    = cols.eq(7).text().trim()
+      const randOpts = cols.eq(8).text().trim()
 
       items.push({
         shop_id:        shopId,
@@ -186,14 +190,17 @@ async function upsertBatch(table: string, rows: any[], conflict: string) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  // Valida env vars
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
     log('❌ SUPABASE_URL e SUPABASE_SERVICE_KEY são obrigatórios no .env')
     process.exit(1)
   }
+  if (!process.env.HEROSAGA_COOKIE) {
+    log('❌ HEROSAGA_COOKIE é obrigatório no .env')
+    process.exit(1)
+  }
 
   const args = process.argv.slice(2)
-  const runAll  = args.length === 0
+  const runAll   = args.length === 0
   const runItems = runAll || args.includes('--items')
   const runShops = runAll || args.includes('--shops')
 
@@ -212,7 +219,6 @@ async function main() {
     await upsertBatch('vending_shops', shops, 'id')
     log('✅ Lojas salvas!')
 
-    // ── Shop Items (em paralelo com concurrency controlada) ──
     log(`🛒 Buscando itens de ${shops.length} lojas (concorrência: ${SHOP_CONCURRENCY})...`)
 
     let done = 0
@@ -220,12 +226,8 @@ async function main() {
 
     for (let i = 0; i < shops.length; i += SHOP_CONCURRENCY) {
       const batch = shops.slice(i, i + SHOP_CONCURRENCY)
-      const results = await Promise.all(
-        batch.map(shop => fetchShopItems(shop.id, shop.currency))
-      )
-      for (const items of results) {
-        allVendingItems.push(...items)
-      }
+      const results = await Promise.all(batch.map(shop => fetchShopItems(shop.id)))
+      for (const items of results) allVendingItems.push(...items)
       done += batch.length
       process.stdout.write(`  ${done}/${shops.length} lojas processadas (${allVendingItems.length} itens)\r`)
       await sleep(DELAY_MS)
@@ -233,12 +235,10 @@ async function main() {
 
     log(`\n💾 Salvando ${allVendingItems.length} itens de lojas no Supabase...`)
 
-    // Filtra apenas item_ids que existem na tabela items
     const { data: knownItems } = await supabase.from('items').select('id')
     const knownIds = new Set((knownItems ?? []).map((r: any) => r.id))
     const filtered = allVendingItems.filter(v => knownIds.has(v.item_id))
     const skipped  = allVendingItems.length - filtered.length
-
     if (skipped > 0) log(`  ⚠️  ${skipped} itens ignorados (item_id não encontrado na tabela items)`)
 
     await upsertBatch('vending_items', filtered, 'shop_id,item_id,refinement')
