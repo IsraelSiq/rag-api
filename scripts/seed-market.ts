@@ -3,17 +3,23 @@
  * Popula as tabelas items, vending_shops e vending_items no Supabase
  * a partir do site rpgherosaga.com
  *
+ * Faz login automático via Discord OAuth com Playwright.
+ *
  * Uso:
- *   npx tsx scripts/seed-market.ts
+ *   npx tsx scripts/seed-market.ts             # tudo
+ *   npx tsx scripts/seed-market.ts --items      # só índice de itens
+ *   npx tsx scripts/seed-market.ts --shops      # só lojas + itens das lojas
  *
  * Variáveis de ambiente necessárias (.env):
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_KEY
- *   HEROSAGA_COOKIE
+ *   DISCORD_EMAIL       (email da conta Discord)
+ *   DISCORD_PASSWORD    (senha da conta Discord)
  */
 
 import * as cheerio from 'cheerio'
 import { createClient } from '@supabase/supabase-js'
+import { chromium } from 'playwright'
 import * as dotenv from 'dotenv'
 
 dotenv.config()
@@ -24,12 +30,8 @@ const BASE = 'https://rpgherosaga.com'
 const DELAY_MS = 400
 const SHOP_CONCURRENCY = 5
 
-// Prefixos de 3 letras comuns em nomes de itens do jogo (PT-BR)
-// Cobre: letras latinas, acentuadas e combinações frequentes
 const SEARCH_TERMS = [
-  // Letras simples triplicadas (garante cobertura base)
   ...('abcdefghijklmnopqrstuvwxyz'.split('').map(c => c + c + c)),
-  // Prefixos comuns em itens RO/Hero Saga
   'arm', 'arc', 'arr', 'asa', 'ata', 'ate',
   'bal', 'ban', 'bar', 'bas', 'bat', 'bau', 'bel', 'ber', 'bol', 'bon', 'bot', 'bra', 'bri', 'bro',
   'cai', 'cal', 'cam', 'can', 'cap', 'car', 'cas', 'cav', 'cer', 'cha', 'chi', 'chu', 'cin', 'cir', 'cob', 'col', 'com', 'con', 'cor', 'cos', 'cou', 'cri', 'cro', 'cru',
@@ -51,10 +53,8 @@ const SEARCH_TERMS = [
   'tab', 'tal', 'tam', 'tar', 'tec', 'tem', 'ten', 'ter', 'tim', 'tis', 'tit', 'tor', 'tot', 'tra', 'tre', 'tri', 'tro', 'tun',
   'ult', 'uni', 'uns',
   'val', 'van', 'var', 'vel', 'ven', 'ver', 'ves', 'via', 'vid', 'vis', 'vit', 'vol', 'vor',
-  'war', 'win',
-  'xan',
+  'war', 'win', 'xan',
   'zap', 'zel', 'zen', 'zon',
-  // Números e IDs
   '100', '200', '300', '400', '500',
 ]
 
@@ -63,18 +63,11 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-function getHeaders(accept: string = 'application/json') {
-  return {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'X-Requested-With': 'XMLHttpRequest',
-    'Accept': accept,
-    'Cookie': process.env.HEROSAGA_COOKIE ?? '',
-  }
-}
-
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+function log(msg: string) {
+  process.stdout.write(`[${new Date().toISOString()}] ${msg}\n`)
+}
 
 function detectCurrency(title: string): 'zeny' | 'hero_points' | 'rmt' {
   const t = (title || '').toUpperCase()
@@ -83,8 +76,74 @@ function detectCurrency(title: string): 'zeny' | 'hero_points' | 'rmt' {
   return 'zeny'
 }
 
-function log(msg: string) {
-  process.stdout.write(`[${new Date().toISOString()}] ${msg}\n`)
+// ─── LOGIN via Playwright ────────────────────────────────────────────────────
+
+async function loginAndGetCookie(): Promise<string> {
+  log('🔐 Iniciando login via Discord...')
+
+  const browser = await chromium.launch({ headless: false }) // headless: false para ver o que acontece
+  const context = await browser.newContext()
+  const page = await context.newPage()
+
+  try {
+    // 1. Acessa o site — será redirecionado para o login
+    await page.goto(`${BASE}/?module=vending&action=filter&page=1`, { waitUntil: 'networkidle' })
+
+    // 2. Clica no botão de login com Discord (ajusta o seletor se necessário)
+    const loginBtn = page.locator('a[href*="discord"], button:has-text("Discord"), a:has-text("Discord")')
+    await loginBtn.first().click()
+    await page.waitForURL('**/discord.com/**', { timeout: 10000 })
+
+    // 3. Preenche email e senha do Discord
+    await page.waitForSelector('input[name="email"]', { timeout: 10000 })
+    await page.fill('input[name="email"]', process.env.DISCORD_EMAIL!)
+    await page.fill('input[name="password"]', process.env.DISCORD_PASSWORD!)
+    await page.click('button[type="submit"]')
+
+    // 4. Aguarda redirecionamento de volta ao site (OAuth callback)
+    // Pode aparecer tela de autorização — clica em Autorizar se aparecer
+    try {
+      const authorizeBtn = page.locator('button:has-text("Autorizar"), button:has-text("Authorize")')
+      await authorizeBtn.waitFor({ timeout: 5000 })
+      await authorizeBtn.click()
+    } catch {
+      // Não apareceu tela de autorização, continua
+    }
+
+    // 5. Aguarda estar logado no site
+    await page.waitForURL(`${BASE}/**`, { timeout: 30000 })
+    await page.waitForLoadState('networkidle')
+
+    // 6. Extrai o cookie de sessão
+    const cookies = await context.cookies(BASE)
+    const sessionCookie = cookies.find(c => c.name === 'fluxSessionData')
+
+    if (!sessionCookie) {
+      // Tira screenshot para debug
+      await page.screenshot({ path: 'scripts/login-debug.png' })
+      throw new Error('Cookie fluxSessionData não encontrado após login. Screenshot salvo em scripts/login-debug.png')
+    }
+
+    const cookieStr = `${sessionCookie.name}=${sessionCookie.value}`
+    log(`✅ Login bem-sucedido! Cookie: ${cookieStr.substring(0, 30)}...`)
+    return cookieStr
+
+  } finally {
+    await browser.close()
+  }
+}
+
+// ─── Fetch com cookie ─────────────────────────────────────────────────────────
+
+let SESSION_COOKIE = ''
+
+function getHeaders(accept: string = 'application/json') {
+  return {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Accept': accept,
+    'Cookie': SESSION_COOKIE,
+  }
 }
 
 // ─── STEP 1: Índice de itens ──────────────────────────────────────────────────
@@ -93,7 +152,7 @@ async function fetchItemIndex() {
   log('🔍 Buscando índice de itens...')
   const seen = new Set<string>()
   const items: { id: string; name: string; is_costume: boolean }[] = []
-  const terms = [...new Set(SEARCH_TERMS)] // remove duplicatas
+  const terms = [...new Set(SEARCH_TERMS)]
 
   for (let i = 0; i < terms.length; i++) {
     const term = terms[i]
@@ -229,10 +288,13 @@ async function main() {
     log('❌ SUPABASE_URL e SUPABASE_SERVICE_KEY são obrigatórios no .env')
     process.exit(1)
   }
-  if (!process.env.HEROSAGA_COOKIE) {
-    log('❌ HEROSAGA_COOKIE é obrigatório no .env')
+  if (!process.env.DISCORD_EMAIL || !process.env.DISCORD_PASSWORD) {
+    log('❌ DISCORD_EMAIL e DISCORD_PASSWORD são obrigatórios no .env')
     process.exit(1)
   }
+
+  // Faz login e obtém cookie de sessão automaticamente
+  SESSION_COOKIE = await loginAndGetCookie()
 
   const args = process.argv.slice(2)
   const runAll   = args.length === 0
@@ -269,14 +331,8 @@ async function main() {
     }
 
     log(`\n💾 Salvando ${allVendingItems.length} itens de lojas no Supabase...`)
-
-    const { data: knownItems } = await supabase.from('items').select('id')
-    const knownIds = new Set((knownItems ?? []).map((r: any) => r.id))
-    const filtered = allVendingItems.filter(v => knownIds.has(v.item_id))
-    const skipped  = allVendingItems.length - filtered.length
-    if (skipped > 0) log(`  ⚠️  ${skipped} itens ignorados (item_id não encontrado na tabela items)`)
-
-    await upsertBatch('vending_items', filtered, 'shop_id,item_id,refinement')
+    // Sem filtro por knownIds — salva tudo, item_name já vem do HTML da loja
+    await upsertBatch('vending_items', allVendingItems, 'shop_id,item_id,refinement')
     log('✅ Itens de lojas salvos!')
   }
 
