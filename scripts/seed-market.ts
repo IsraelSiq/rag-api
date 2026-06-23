@@ -1,62 +1,40 @@
 /**
  * seed-market.ts
- * Popula as tabelas items, vending_shops e vending_items no Supabase
- * a partir do site rpgherosaga.com
+ * Popula as tabelas vending_shops, vending_items e items no Supabase.
  *
- * Faz login automático via Discord OAuth com Playwright.
+ * Fluxo:
+ *   1. Busca todas as lojas abertas no Hero Saga (requer cookie de sessão)
+ *   2. Busca os itens de cada loja via HTML scraping
+ *   3. Salva lojas e itens no Supabase
+ *   4. Enriquece a tabela `items` consultando a API do Divine Pride
+ *      para cada item_id único encontrado nas lojas
  *
  * Uso:
- *   npx tsx scripts/seed-market.ts             # tudo
- *   npx tsx scripts/seed-market.ts --items      # só índice de itens
- *   npx tsx scripts/seed-market.ts --shops      # só lojas + itens das lojas
+ *   npx tsx scripts/seed-market.ts            # tudo
+ *   npx tsx scripts/seed-market.ts --shops    # lojas + itens das lojas
+ *   npx tsx scripts/seed-market.ts --enrich   # só enriquece itens via Divine Pride
  *
- * Variáveis de ambiente necessárias (.env):
+ * Variáveis de ambiente (.env):
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_KEY
- *   DISCORD_EMAIL       (email da conta Discord)
- *   DISCORD_PASSWORD    (senha da conta Discord)
+ *   HEROSAGA_COOKIE          (ex: fluxSessionData=abc123)
+ *   DIVINE_PRIDE_API_KEY
  */
 
 import * as cheerio from 'cheerio'
 import { createClient } from '@supabase/supabase-js'
-import { chromium } from 'playwright'
 import * as dotenv from 'dotenv'
 
 dotenv.config()
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const BASE = 'https://rpgherosaga.com'
-const DELAY_MS = 400
+const BASE        = 'https://rpgherosaga.com'
+const DP_BASE     = 'https://www.divine-pride.net/api/database'
+const DP_SERVER   = 'bRO'
+const DELAY_MS    = 300
 const SHOP_CONCURRENCY = 5
-
-const SEARCH_TERMS = [
-  ...('abcdefghijklmnopqrstuvwxyz'.split('').map(c => c + c + c)),
-  'arm', 'arc', 'arr', 'asa', 'ata', 'ate',
-  'bal', 'ban', 'bar', 'bas', 'bat', 'bau', 'bel', 'ber', 'bol', 'bon', 'bot', 'bra', 'bri', 'bro',
-  'cai', 'cal', 'cam', 'can', 'cap', 'car', 'cas', 'cav', 'cer', 'cha', 'chi', 'chu', 'cin', 'cir', 'cob', 'col', 'com', 'con', 'cor', 'cos', 'cou', 'cri', 'cro', 'cru',
-  'dar', 'dec', 'def', 'del', 'den', 'des', 'dia', 'dra', 'dro',
-  'ele', 'enc', 'ene', 'eng', 'enr', 'ens', 'ent', 'env', 'equ', 'esc', 'esp', 'est', 'eve',
-  'fad', 'fan', 'far', 'fei', 'fer', 'fla', 'fle', 'flo', 'for', 'fra', 'fri', 'fro', 'fun',
-  'gal', 'gem', 'ger', 'gla', 'glo', 'gol', 'gra', 'gri', 'gua', 'gue',
-  'hel', 'her', 'hom',
-  'ima', 'imp', 'inf', 'ins', 'int', 'inv',
-  'jad', 'jav', 'jon',
-  'lac', 'lam', 'lan', 'lap', 'lar', 'las', 'len', 'lio', 'lis', 'lit', 'lon',
-  'mac', 'mag', 'mal', 'man', 'mar', 'mas', 'med', 'mel', 'mes', 'met', 'moe', 'mol', 'mon', 'mor', 'mun',
-  'nac', 'nag', 'niv',
-  'ocu', 'old', 'oli', 'ore', 'ori',
-  'pac', 'pal', 'pan', 'par', 'pas', 'pat', 'ped', 'pen', 'per', 'pes', 'pie', 'pin', 'pla', 'poc', 'pol', 'por', 'pro',
-  'qui',
-  'rad', 'ram', 'rap', 'ras', 'rec', 'ref', 'rei', 'rel', 'rem', 'ren', 'res', 'rev', 'rin', 'rob', 'rod', 'ron', 'ros', 'rou', 'rub', 'run',
-  'sab', 'sal', 'san', 'sar', 'sec', 'sel', 'sem', 'sen', 'ser', 'sil', 'sim', 'sir', 'sob', 'sol', 'som', 'sor', 'sub', 'sul', 'sup',
-  'tab', 'tal', 'tam', 'tar', 'tec', 'tem', 'ten', 'ter', 'tim', 'tis', 'tit', 'tor', 'tot', 'tra', 'tre', 'tri', 'tro', 'tun',
-  'ult', 'uni', 'uns',
-  'val', 'van', 'var', 'vel', 'ven', 'ver', 'ves', 'via', 'vid', 'vis', 'vit', 'vol', 'vor',
-  'war', 'win', 'xan',
-  'zap', 'zel', 'zen', 'zon',
-  '100', '200', '300', '400', '500',
-]
+const DP_CONCURRENCY   = 5   // requisições paralelas ao Divine Pride
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -72,115 +50,22 @@ function log(msg: string) {
 function detectCurrency(title: string): 'zeny' | 'hero_points' | 'rmt' {
   const t = (title || '').toUpperCase()
   if (t.includes('[HERO POINTS]') || t.includes('[ROPS]')) return 'hero_points'
-  if (t.includes('[MOEDA RMT]') || t.includes('[RMT]'))   return 'rmt'
+  if (t.includes('[MOEDA RMT]')   || t.includes('[RMT]'))  return 'rmt'
   return 'zeny'
 }
 
-// ─── LOGIN via Playwright ────────────────────────────────────────────────────
+// ─── Headers Hero Saga ────────────────────────────────────────────────────────
 
-async function loginAndGetCookie(): Promise<string> {
-  log('🔐 Iniciando login via Discord...')
-
-  const browser = await chromium.launch({ headless: false }) // headless: false para ver o que acontece
-  const context = await browser.newContext()
-  const page = await context.newPage()
-
-  try {
-    // 1. Acessa o site — será redirecionado para o login
-    await page.goto(`${BASE}/?module=vending&action=filter&page=1`, { waitUntil: 'networkidle' })
-
-    // 2. Clica no botão de login com Discord (ajusta o seletor se necessário)
-    const loginBtn = page.locator('a[href*="discord"], button:has-text("Discord"), a:has-text("Discord")')
-    await loginBtn.first().click()
-    await page.waitForURL('**/discord.com/**', { timeout: 10000 })
-
-    // 3. Preenche email e senha do Discord
-    await page.waitForSelector('input[name="email"]', { timeout: 10000 })
-    await page.fill('input[name="email"]', process.env.DISCORD_EMAIL!)
-    await page.fill('input[name="password"]', process.env.DISCORD_PASSWORD!)
-    await page.click('button[type="submit"]')
-
-    // 4. Aguarda redirecionamento de volta ao site (OAuth callback)
-    // Pode aparecer tela de autorização — clica em Autorizar se aparecer
-    try {
-      const authorizeBtn = page.locator('button:has-text("Autorizar"), button:has-text("Authorize")')
-      await authorizeBtn.waitFor({ timeout: 5000 })
-      await authorizeBtn.click()
-    } catch {
-      // Não apareceu tela de autorização, continua
-    }
-
-    // 5. Aguarda estar logado no site
-    await page.waitForURL(`${BASE}/**`, { timeout: 30000 })
-    await page.waitForLoadState('networkidle')
-
-    // 6. Extrai o cookie de sessão
-    const cookies = await context.cookies(BASE)
-    const sessionCookie = cookies.find(c => c.name === 'fluxSessionData')
-
-    if (!sessionCookie) {
-      // Tira screenshot para debug
-      await page.screenshot({ path: 'scripts/login-debug.png' })
-      throw new Error('Cookie fluxSessionData não encontrado após login. Screenshot salvo em scripts/login-debug.png')
-    }
-
-    const cookieStr = `${sessionCookie.name}=${sessionCookie.value}`
-    log(`✅ Login bem-sucedido! Cookie: ${cookieStr.substring(0, 30)}...`)
-    return cookieStr
-
-  } finally {
-    await browser.close()
-  }
-}
-
-// ─── Fetch com cookie ─────────────────────────────────────────────────────────
-
-let SESSION_COOKIE = ''
-
-function getHeaders(accept: string = 'application/json') {
+function getHeaders(accept = 'application/json') {
   return {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'X-Requested-With': 'XMLHttpRequest',
-    'Accept': accept,
-    'Cookie': SESSION_COOKIE,
+    'User-Agent':        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'X-Requested-With':  'XMLHttpRequest',
+    'Accept':            accept,
+    'Cookie':            process.env.HEROSAGA_COOKIE ?? '',
   }
 }
 
-// ─── STEP 1: Índice de itens ──────────────────────────────────────────────────
-
-async function fetchItemIndex() {
-  log('🔍 Buscando índice de itens...')
-  const seen = new Set<string>()
-  const items: { id: string; name: string; is_costume: boolean }[] = []
-  const terms = [...new Set(SEARCH_TERMS)]
-
-  for (let i = 0; i < terms.length; i++) {
-    const term = terms[i]
-    try {
-      const res = await fetch(
-        `${BASE}/?module=vending&action=search&item_search=${encodeURIComponent(term)}`,
-        { headers: getHeaders() }
-      )
-      const json = await res.json() as { results?: any[] }
-      for (const item of json.results ?? []) {
-        const id = String(item.id)
-        if (!seen.has(id)) {
-          seen.add(id)
-          items.push({ id, name: item.name, is_costume: !!item.is_costume })
-        }
-      }
-      process.stdout.write(`  [${i + 1}/${terms.length}] "${term}" → ${items.length} itens únicos\r`)
-    } catch (e) {
-      log(`  ⚠️  Erro no termo "${term}": ${e}`)
-    }
-    await sleep(DELAY_MS)
-  }
-
-  log(`\n✅ ${items.length} itens únicos encontrados`)
-  return items
-}
-
-// ─── STEP 2: Lojas abertas ────────────────────────────────────────────────────
+// ─── STEP 1: Lojas abertas ────────────────────────────────────────────────────
 
 async function fetchAllShops() {
   log('🏪 Buscando lojas abertas...')
@@ -190,7 +75,7 @@ async function fetchAllShops() {
 
   do {
     try {
-      const res = await fetch(
+      const res  = await fetch(
         `${BASE}/?module=vending&action=filter&page=${page}&sort=id&order=asc`,
         { headers: getHeaders() }
       )
@@ -222,7 +107,7 @@ async function fetchAllShops() {
   return shops
 }
 
-// ─── STEP 3: Itens de uma loja ────────────────────────────────────────────────
+// ─── STEP 2: Itens de uma loja ────────────────────────────────────────────────
 
 async function fetchShopItems(shopId: string) {
   try {
@@ -230,12 +115,12 @@ async function fetchShopItems(shopId: string) {
       `${BASE}/?module=vending&action=viewshop&id=${shopId}`,
       { headers: getHeaders('text/html') }
     )
-    const $ = cheerio.load(await res.text())
+    const $     = cheerio.load(await res.text())
     const items: any[] = []
 
     $('table tbody tr').each((_, row) => {
-      const cols = $(row).find('td')
-      const itemId = cols.eq(0).text().trim()
+      const cols    = $(row).find('td')
+      const itemId  = cols.eq(0).text().trim()
       if (!itemId || !/^\d+$/.test(itemId)) return
 
       const refinRaw = cols.eq(2).text().trim()
@@ -269,6 +154,51 @@ async function fetchShopItems(shopId: string) {
   }
 }
 
+// ─── STEP 3: Enriquece itens via Divine Pride ─────────────────────────────────
+
+async function fetchDivinePrideItem(itemId: string) {
+  try {
+    const url = `${DP_BASE}/Item/${itemId}?apiKey=${process.env.DIVINE_PRIDE_API_KEY}&server=${DP_SERVER}`
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } })
+    if (!res.ok) return null
+    const json = await res.json() as any
+    return {
+      id:          String(json.id),
+      name:        json.name ?? json.unidName ?? '',
+      type:        json.typeId ?? null,
+      sub_type:    json.subTypeId ?? null,
+      weight:      json.weight ?? null,
+      slots:       json.slots ?? 0,
+      is_costume:  false,
+      dp_data:     json,  // guarda o JSON completo para uso futuro
+    }
+  } catch {
+    return null
+  }
+}
+
+async function enrichItemsFromDivinePride(itemIds: string[]) {
+  log(`📖 Enriquecendo ${itemIds.length} itens via Divine Pride...`)
+  const results: any[] = []
+  let done = 0
+  let notFound = 0
+
+  for (let i = 0; i < itemIds.length; i += DP_CONCURRENCY) {
+    const batch = itemIds.slice(i, i + DP_CONCURRENCY)
+    const fetched = await Promise.all(batch.map(id => fetchDivinePrideItem(id)))
+    for (const item of fetched) {
+      if (item) results.push(item)
+      else notFound++
+    }
+    done += batch.length
+    process.stdout.write(`  ${done}/${itemIds.length} consultados (${results.length} encontrados, ${notFound} não encontrados)\r`)
+    await sleep(DELAY_MS)
+  }
+
+  log(`\n✅ ${results.length} itens enriquecidos (${notFound} não encontrados no Divine Pride)`)
+  return results
+}
+
 // ─── STEP 4: Upsert em lote ───────────────────────────────────────────────────
 
 async function upsertBatch(table: string, rows: any[], conflict: string) {
@@ -288,26 +218,21 @@ async function main() {
     log('❌ SUPABASE_URL e SUPABASE_SERVICE_KEY são obrigatórios no .env')
     process.exit(1)
   }
-  if (!process.env.DISCORD_EMAIL || !process.env.DISCORD_PASSWORD) {
-    log('❌ DISCORD_EMAIL e DISCORD_PASSWORD são obrigatórios no .env')
+  if (!process.env.HEROSAGA_COOKIE) {
+    log('❌ HEROSAGA_COOKIE é obrigatório no .env')
+    process.exit(1)
+  }
+  if (!process.env.DIVINE_PRIDE_API_KEY) {
+    log('❌ DIVINE_PRIDE_API_KEY é obrigatório no .env')
     process.exit(1)
   }
 
-  // Faz login e obtém cookie de sessão automaticamente
-  SESSION_COOKIE = await loginAndGetCookie()
+  const args       = process.argv.slice(2)
+  const runAll     = args.length === 0
+  const runShops   = runAll || args.includes('--shops')
+  const runEnrich  = runAll || args.includes('--enrich')
 
-  const args = process.argv.slice(2)
-  const runAll   = args.length === 0
-  const runItems = runAll || args.includes('--items')
-  const runShops = runAll || args.includes('--shops')
-
-  // ── Items ──
-  if (runItems) {
-    const items = await fetchItemIndex()
-    log('💾 Salvando itens no Supabase...')
-    await upsertBatch('items', items, 'id')
-    log('✅ Itens salvos!')
-  }
+  let allVendingItems: any[] = []
 
   // ── Shops ──
   if (runShops) {
@@ -317,13 +242,11 @@ async function main() {
     log('✅ Lojas salvas!')
 
     log(`🛒 Buscando itens de ${shops.length} lojas (concorrência: ${SHOP_CONCURRENCY})...`)
-
     let done = 0
-    const allVendingItems: any[] = []
 
     for (let i = 0; i < shops.length; i += SHOP_CONCURRENCY) {
-      const batch = shops.slice(i, i + SHOP_CONCURRENCY)
-      const results = await Promise.all(batch.map(shop => fetchShopItems(shop.id)))
+      const batch   = shops.slice(i, i + SHOP_CONCURRENCY)
+      const results = await Promise.all(batch.map(s => fetchShopItems(s.id)))
       for (const items of results) allVendingItems.push(...items)
       done += batch.length
       process.stdout.write(`  ${done}/${shops.length} lojas processadas (${allVendingItems.length} itens)\r`)
@@ -331,9 +254,25 @@ async function main() {
     }
 
     log(`\n💾 Salvando ${allVendingItems.length} itens de lojas no Supabase...`)
-    // Sem filtro por knownIds — salva tudo, item_name já vem do HTML da loja
     await upsertBatch('vending_items', allVendingItems, 'shop_id,item_id,refinement')
     log('✅ Itens de lojas salvos!')
+  }
+
+  // ── Enrich via Divine Pride ──
+  if (runEnrich) {
+    // Pega item_ids únicos do Supabase (todos que já foram salvos)
+    const { data: vendingItems, error } = await supabase
+      .from('vending_items')
+      .select('item_id')
+    if (error) { log(`❌ Erro ao buscar item_ids: ${error.message}`); process.exit(1) }
+
+    const uniqueIds = [...new Set((vendingItems ?? []).map((r: any) => String(r.item_id)))]
+    log(`🔎 ${uniqueIds.length} item_ids únicos encontrados nas lojas`)
+
+    const enriched = await enrichItemsFromDivinePride(uniqueIds)
+    log('💾 Salvando itens enriquecidos no Supabase...')
+    await upsertBatch('items', enriched, 'id')
+    log('✅ Itens salvos!')
   }
 
   log('🎉 Seed completo!')
