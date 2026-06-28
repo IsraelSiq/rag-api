@@ -3,11 +3,8 @@
  *
  * Ingere itens da Divine Pride API diretamente no Supabase.
  *
- * Fonte de IDs: rAthena item_db_equip.yml (GitHub) — contorna o bloqueio
- * de listagem da Divine Pride API (?type=N retorna HTML/Cloudflare).
- *
- * Fonte de scripts: rAthena YAML (itemScript completo) + fallback Divine Pride.
- * Fonte de detalhes: Divine Pride /item/{id} (nome, slots, peso, imagem, etc.)
+ * Fonte de IDs/scripts : rAthena item_db_equip.yml + item_db_etc.yml (GitHub)
+ * Fonte de detalhes   : Divine Pride /item/{id} (nome, slots, peso, imagem…)
  *
  * Uso:
  *   npx dotenv -- ts-node --project tsconfig.scripts.json scripts/ingest-all.ts
@@ -65,6 +62,14 @@ function bar(current: number, total: number, width = 25) {
     `(${fmt(current)}/${fmt(total)})`
 }
 
+/**
+ * Resolve o nome do item com fallback em cascata:
+ *   Divine Pride name → unidName → rAthena Name → aegisName (jamais nulo)
+ */
+function resolveName(dpName: string | null | undefined, dpUnid: string | null | undefined, rathenaName: string | null, aegisName: string): string {
+  return dpName?.trim() || dpUnid?.trim() || rathenaName?.trim() || aegisName || `item_${aegisName}`
+}
+
 // ─── Processar um único item ──────────────────────────────────────────────────
 
 async function processItem(
@@ -74,37 +79,37 @@ async function processItem(
     with_bonus: number; total_bonuses: number; errors: string[]
   }
 ) {
-  const { id, script: rathenaScript } = rathenaEntry
+  const { id, script: rathenaScript, rathenaName, aegisName } = rathenaEntry
 
   try {
-    // Busca detalhes na Divine Pride (nome, slots, peso, descrição, imagem)
     const dpItem = await fetchItem(id)
     if (!dpItem) { report.skipped++; return }
 
-    // Script: prefere Divine Pride (mais atualizado), fallback rAthena
-    const dpScript  = getBonusScript(dpItem)
-    const script    = dpScript || rathenaScript || ''
-    const bonuses   = parseBonusScript(script)
+    // ── Nome com fallback em cascata ─────────────────────────────────────────
+    const name = resolveName(dpItem.name, dpItem.unidName, rathenaName, aegisName)
+
+    // ── Script: prefere Divine Pride, fallback rAthena ───────────────────────
+    const dpScript = getBonusScript(dpItem)
+    const script   = dpScript || rathenaScript || ''
+    const bonuses  = parseBonusScript(script)
 
     if (DRY_RUN) {
-      if (bonuses.length > 0) {
-        const preview = bonuses
-          .slice(0, 3)
-          .map(b => `${b.stat}:${b.value > 0 ? '+' : ''}${b.value}`)
-          .join(' ')
-        console.log(
-          `  #${String(id).padStart(5)} ${dpItem.name.slice(0, 38).padEnd(38)}` +
-          ` [${script ? 'RA' : 'DP'}] → ${preview}${bonuses.length > 3 ? ` +${bonuses.length - 3}` : ''}`
-        )
-      }
+      const src     = dpScript ? 'DP' : (rathenaScript ? 'RA' : '--')
+      const preview = bonuses.length > 0
+        ? bonuses.slice(0, 3).map(b => `${b.stat}:${b.value > 0 ? '+' : ''}${b.value}`).join(' ')
+        : '(sem bônus)'
+      console.log(
+        `  #${String(id).padStart(6)} ${name.slice(0, 36).padEnd(36)}` +
+        ` [${src}] → ${preview}${bonuses.length > 3 ? ` +${bonuses.length - 3}` : ''}`
+      )
       report.inserted++
       return
     }
 
-    // ── Upsert item ────────────────────────────────────────────────────────
+    // ── Upsert item ──────────────────────────────────────────────────────────
     const { error: upsertErr } = await supabase.from('items').upsert({
       id:          String(id),
-      name:        dpItem.name,
+      name,
       type:        dpItem.itemTypeId,
       sub_type:    dpItem.itemSubTypeId ?? null,
       slots:       dpItem.slots ?? 0,
@@ -116,11 +121,11 @@ async function processItem(
     }, { onConflict: 'id' })
 
     if (upsertErr) {
-      report.errors.push(`#${id}: ${upsertErr.message}`)
+      report.errors.push(`#${id} (${name}): ${upsertErr.message}`)
       return
     }
 
-    // ── Reconstrói item_bonuses ────────────────────────────────────────────
+    // ── Reconstrói item_bonuses ──────────────────────────────────────────────
     if (bonuses.length > 0) {
       await supabase.from('item_bonuses').delete().eq('item_id', String(id))
 
@@ -157,24 +162,25 @@ async function processItem(
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('\n🚀  ingest-all.ts  (fonte: rAthena + Divine Pride)')
+  console.log('\n🚀  ingest-all.ts  (rAthena equip+etc → Divine Pride)')
   console.log(`   Tipos   : ${TYPES.map(t => `${t} (${TYPE_NAMES[t] ?? '?'})`).join(', ')}`)
   console.log(`   Modo    : ${DRY_RUN ? 'DRY RUN' : 'PRODUÇÃO'}`)
   if (LIMIT !== Infinity) console.log(`   Limite  : ${LIMIT} itens/tipo`)
   if (RESET && !DRY_RUN)  console.log('   Reset   : ✔ (item_bonuses será limpo)')
   console.log('')
 
-  // Reset opcional
   if (RESET && !DRY_RUN) {
     console.log('🗑️  Limpando item_bonuses...')
     await supabase.from('item_bonuses').delete().neq('id', 0)
     console.log('   ✔ Limpo.\n')
   }
 
-  // ── Baixa lista de IDs do rAthena (uma única vez para todos os tipos) ────
-  console.log('⬇️   Baixando item_db_equip.yml do rAthena GitHub...')
+  // ── Baixa ambos os YAMLs de uma vez ─────────────────────────────────────────
+  console.log('⬇️   Baixando item_db_equip.yml + item_db_etc.yml do rAthena...')
   const allRAthenaItems = await fetchRAthenaEquipIds()
-  console.log(`   ✔ ${fmt(allRAthenaItems.length)} equipamentos carregados do rAthena.\n`)
+  const equip = allRAthenaItems.filter(i => i.typeId !== 6)
+  const cards = allRAthenaItems.filter(i => i.typeId === 6)
+  console.log(`   ✔ ${fmt(equip.length)} equipamentos  |  ${fmt(cards.length)} cards carregados.\n`)
 
   const globalReport = {
     inserted: 0, skipped: 0,
@@ -186,11 +192,15 @@ async function main() {
     const typeName = TYPE_NAMES[type] ?? String(type)
     console.log(`\n📦  Tipo ${type} — ${typeName}`)
 
-    // Filtra itens deste tipo
     let list = filterByType(allRAthenaItems, [type])
     if (LIMIT !== Infinity) list = list.slice(0, LIMIT)
 
-    console.log(`   ✔ ${fmt(list.length)} IDs encontrados no rAthena. Buscando detalhes na Divine Pride...\n`)
+    if (list.length === 0) {
+      console.log(`   ⚠️  Nenhum item deste tipo encontrado no rAthena.`)
+      continue
+    }
+
+    console.log(`   ✔ ${fmt(list.length)} IDs encontrados. Buscando detalhes na Divine Pride...\n`)
 
     const typeReport = {
       inserted: 0, skipped: 0,
@@ -203,7 +213,6 @@ async function main() {
         `\r   ${bar(i + 1, list.length)} #${entry.id} ${entry.aegisName.slice(0, 20).padEnd(20)}`
       )
       await processItem(entry, typeReport)
-      // Rate limit respeitoso com a Divine Pride: 1 req/s
       await new Promise(r => setTimeout(r, 1050))
     }
 
@@ -222,7 +231,6 @@ async function main() {
     globalReport.errors.push(...typeReport.errors)
   }
 
-  // ─── Relatório final ───────────────────────────────────────────────────────
   console.log('\n\n' + '─'.repeat(55))
   console.log('📊  RELATÓRIO FINAL')
   console.log('─'.repeat(55))
@@ -234,7 +242,7 @@ async function main() {
 
   if (globalReport.errors.length > 0) {
     console.log('\n⚠️  Primeiros erros:')
-    globalReport.errors.slice(0, 10).forEach(e => console.log('  ', e))
+    globalReport.errors.slice(0, 10).forEach(e => console.log('   ', e))
   }
 
   if (DRY_RUN) {
