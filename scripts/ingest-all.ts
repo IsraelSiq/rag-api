@@ -1,24 +1,28 @@
 /**
  * scripts/ingest-all.ts
  *
- * Ingere itens da Divine Pride API diretamente no Supabase,
- * sem precisar de servidor HTTP rodando localmente.
+ * Ingere itens da Divine Pride API diretamente no Supabase.
  *
- * Busca item a item via /item/{id} (rota que retorna itemScript completo)
- * e popula items + item_bonuses em sequência.
+ * Fonte de IDs: rAthena item_db_equip.yml (GitHub) — contorna o bloqueio
+ * de listagem da Divine Pride API (?type=N retorna HTML/Cloudflare).
+ *
+ * Fonte de scripts: rAthena YAML (itemScript completo) + fallback Divine Pride.
+ * Fonte de detalhes: Divine Pride /item/{id} (nome, slots, peso, imagem, etc.)
  *
  * Uso:
  *   npx dotenv -- ts-node --project tsconfig.scripts.json scripts/ingest-all.ts
  *
  * Flags:
- *   --types=4,5,6,18,10   Tipos a ingerir (default: 4,5,6,18)
- *   --dry-run              Mostra sem gravar
- *   --reset                Limpa item_bonuses antes de começar
+ *   --types=4,5,6,18   Tipos a ingerir (default: 4,5,6,18)
+ *   --dry-run           Mostra sem gravar
+ *   --reset             Limpa item_bonuses antes de começar
+ *   --limit=100         Limita a N itens por tipo (útil para testes)
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { fetchItem, fetchItemsByType, getBonusScript, DP_ITEM_TYPES, type DPItemType } from '../lib/divine-pride'
+import { fetchItem, getBonusScript, DP_ITEM_TYPES, type DPItemType } from '../lib/divine-pride'
 import { parseBonusScript } from '../lib/bonus-parser'
+import { fetchRAthenaEquipIds, filterByType, type RAthenaItem } from '../lib/rathena-ids'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -34,6 +38,9 @@ const args      = process.argv.slice(2)
 const DRY_RUN   = args.includes('--dry-run')
 const RESET     = args.includes('--reset')
 const TYPES_ARG = args.find(a => a.startsWith('--types='))
+const LIMIT_ARG = args.find(a => a.startsWith('--limit='))
+const LIMIT     = LIMIT_ARG ? parseInt(LIMIT_ARG.split('=')[1], 10) : Infinity
+
 const TYPES: DPItemType[] = TYPES_ARG
   ? TYPES_ARG.split('=')[1].split(',').map(Number) as DPItemType[]
   : [DP_ITEM_TYPES.WEAPON, DP_ITEM_TYPES.ARMOR, DP_ITEM_TYPES.CARD, DP_ITEM_TYPES.SHADOW]
@@ -51,36 +58,50 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 function fmt(n: number) { return n.toLocaleString('pt-BR') }
 
 function bar(current: number, total: number, width = 25) {
-  const pct   = total > 0 ? current / total : 0
+  const pct    = total > 0 ? current / total : 0
   const filled = Math.round(pct * width)
   return '[' + '█'.repeat(filled) + '░'.repeat(width - filled) + '] ' +
     String(Math.round(pct * 100)).padStart(3) + '% ' +
     `(${fmt(current)}/${fmt(total)})`
 }
 
-// ─── Processar um único item ───────────────────────────────────────────────────
+// ─── Processar um único item ──────────────────────────────────────────────────
 
-async function processItem(id: number, report: {
-  inserted: number; updated: number; skipped: number
-  with_bonus: number; total_bonuses: number; errors: string[]
-}) {
+async function processItem(
+  rathenaEntry: RAthenaItem,
+  report: {
+    inserted: number; skipped: number
+    with_bonus: number; total_bonuses: number; errors: string[]
+  }
+) {
+  const { id, script: rathenaScript } = rathenaEntry
+
   try {
+    // Busca detalhes na Divine Pride (nome, slots, peso, descrição, imagem)
     const dpItem = await fetchItem(id)
     if (!dpItem) { report.skipped++; return }
 
-    const script  = getBonusScript(dpItem)
-    const bonuses = parseBonusScript(script)
+    // Script: prefere Divine Pride (mais atualizado), fallback rAthena
+    const dpScript  = getBonusScript(dpItem)
+    const script    = dpScript || rathenaScript || ''
+    const bonuses   = parseBonusScript(script)
 
     if (DRY_RUN) {
       if (bonuses.length > 0) {
-        const preview = bonuses.slice(0, 3).map(b => `${b.stat}:${b.value > 0 ? '+' : ''}${b.value}`).join(' ')
-        console.log(`  #${id} ${dpItem.name.slice(0, 40).padEnd(40)} → ${preview}${bonuses.length > 3 ? ' ...' : ''}`)
+        const preview = bonuses
+          .slice(0, 3)
+          .map(b => `${b.stat}:${b.value > 0 ? '+' : ''}${b.value}`)
+          .join(' ')
+        console.log(
+          `  #${String(id).padStart(5)} ${dpItem.name.slice(0, 38).padEnd(38)}` +
+          ` [${script ? 'RA' : 'DP'}] → ${preview}${bonuses.length > 3 ? ` +${bonuses.length - 3}` : ''}`
+        )
       }
       report.inserted++
       return
     }
 
-    // Upsert item
+    // ── Upsert item ────────────────────────────────────────────────────────
     const { error: upsertErr } = await supabase.from('items').upsert({
       id:          String(id),
       name:        dpItem.name,
@@ -99,30 +120,33 @@ async function processItem(id: number, report: {
       return
     }
 
-    // Reconstrói item_bonuses
+    // ── Reconstrói item_bonuses ────────────────────────────────────────────
     if (bonuses.length > 0) {
       await supabase.from('item_bonuses').delete().eq('item_id', String(id))
+
       const { error: bonusErr } = await supabase.from('item_bonuses').insert(
         bonuses.map(b => ({
           item_id:   String(id),
           stat:      b.stat,
           value:     b.value,
           condition: b.condition ?? 'always',
-          job_id:    b.job_id ?? null,
+          job_id:    b.job_id    ?? null,
           skill_mod: b.skill_mod ?? null,
           is_card:   dpItem.itemTypeId === DP_ITEM_TYPES.CARD,
         }))
       )
+
       if (!bonusErr) {
         report.with_bonus++
         report.total_bonuses += bonuses.length
+      } else {
+        report.errors.push(`#${id} bonuses: ${bonusErr.message}`)
       }
     }
 
     report.inserted++
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    // Ignora 404s silenciosamente, loga o resto
     if (!msg.includes('404') && !msg.includes('não encontrado')) {
       report.errors.push(`#${id}: ${msg}`)
     }
@@ -133,10 +157,11 @@ async function processItem(id: number, report: {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('\n🚀  ingest-all.ts')
+  console.log('\n🚀  ingest-all.ts  (fonte: rAthena + Divine Pride)')
   console.log(`   Tipos   : ${TYPES.map(t => `${t} (${TYPE_NAMES[t] ?? '?'})`).join(', ')}`)
   console.log(`   Modo    : ${DRY_RUN ? 'DRY RUN' : 'PRODUÇÃO'}`)
-  if (RESET && !DRY_RUN) console.log('   Reset   : ✔ (item_bonuses será limpo)')
+  if (LIMIT !== Infinity) console.log(`   Limite  : ${LIMIT} itens/tipo`)
+  if (RESET && !DRY_RUN)  console.log('   Reset   : ✔ (item_bonuses será limpo)')
   console.log('')
 
   // Reset opcional
@@ -146,35 +171,54 @@ async function main() {
     console.log('   ✔ Limpo.\n')
   }
 
-  const globalReport = { inserted: 0, updated: 0, skipped: 0, with_bonus: 0, total_bonuses: 0, errors: [] as string[] }
+  // ── Baixa lista de IDs do rAthena (uma única vez para todos os tipos) ────
+  console.log('⬇️   Baixando item_db_equip.yml do rAthena GitHub...')
+  const allRAthenaItems = await fetchRAthenaEquipIds()
+  console.log(`   ✔ ${fmt(allRAthenaItems.length)} equipamentos carregados do rAthena.\n`)
+
+  const globalReport = {
+    inserted: 0, skipped: 0,
+    with_bonus: 0, total_bonuses: 0,
+    errors: [] as string[],
+  }
 
   for (const type of TYPES) {
     const typeName = TYPE_NAMES[type] ?? String(type)
     console.log(`\n📦  Tipo ${type} — ${typeName}`)
-    console.log('   Listando IDs na Divine Pride...')
 
-    const list = await fetchItemsByType(type as DPItemType, {
-      onPage: (items, page) => process.stdout.write(`\r   Página ${page}: ${items.length} itens encontrados...`),
-    })
+    // Filtra itens deste tipo
+    let list = filterByType(allRAthenaItems, [type])
+    if (LIMIT !== Infinity) list = list.slice(0, LIMIT)
 
-    console.log(`\r   ✔ ${fmt(list.length)} IDs encontrados. Buscando detalhes...\n`)
+    console.log(`   ✔ ${fmt(list.length)} IDs encontrados no rAthena. Buscando detalhes na Divine Pride...\n`)
 
-    const typeReport = { inserted: 0, updated: 0, skipped: 0, with_bonus: 0, total_bonuses: 0, errors: [] as string[] }
+    const typeReport = {
+      inserted: 0, skipped: 0,
+      with_bonus: 0, total_bonuses: 0,
+      errors: [] as string[],
+    }
 
     for (const [i, entry] of list.entries()) {
-      process.stdout.write(`\r   ${bar(i + 1, list.length)} #${entry.id} ${entry.name.slice(0, 20).padEnd(20)}`)
-      await processItem(entry.id, typeReport)
-      // Rate limit: 1 req/s
+      process.stdout.write(
+        `\r   ${bar(i + 1, list.length)} #${entry.id} ${entry.aegisName.slice(0, 20).padEnd(20)}`
+      )
+      await processItem(entry, typeReport)
+      // Rate limit respeitoso com a Divine Pride: 1 req/s
       await new Promise(r => setTimeout(r, 1050))
     }
 
-    console.log(`\n\n   ✅ ${typeName}: ${fmt(typeReport.inserted)} salvos | ${fmt(typeReport.with_bonus)} com bônus | ${fmt(typeReport.total_bonuses)} bônus totais | ${typeReport.errors.length} erros`)
+    console.log(
+      `\n\n   ✅ ${typeName}: ` +
+      `${fmt(typeReport.inserted)} salvos | ` +
+      `${fmt(typeReport.with_bonus)} com bônus | ` +
+      `${fmt(typeReport.total_bonuses)} bônus totais | ` +
+      `${typeReport.errors.length} erros`
+    )
 
-    // Acumula no global
-    globalReport.inserted     += typeReport.inserted
-    globalReport.with_bonus   += typeReport.with_bonus
+    globalReport.inserted      += typeReport.inserted
+    globalReport.with_bonus    += typeReport.with_bonus
     globalReport.total_bonuses += typeReport.total_bonuses
-    globalReport.skipped      += typeReport.skipped
+    globalReport.skipped       += typeReport.skipped
     globalReport.errors.push(...typeReport.errors)
   }
 
