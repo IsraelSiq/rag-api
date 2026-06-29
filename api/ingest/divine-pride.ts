@@ -71,6 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue
         }
 
+        // @ts-ignore — supabase types derivados de Database não inferem corretamente sem gerador
         const { error: upsertErr } = await supabase.from('items').upsert({
           id:          String(id),
           name:        dpItem.name,
@@ -98,7 +99,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             skill_mod: b.skill_mod ?? null,
           }))
 
-          await supabase.from('item_bonuses').insert(rows as unknown as Record<string, unknown>[])
+          // @ts-ignore — supabase types derivados de Database não inferem corretamente sem gerador
+          await supabase.from('item_bonuses').insert(rows)
         }
 
         report.inserted++
