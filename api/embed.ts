@@ -45,7 +45,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'COHERE_API_KEY not configured.' })
   }
 
-  // ?table=items  ou  ?table=skills (default)
   const table = ((req.query.table as string) ?? 'skills') === 'items' ? 'items' : 'skills'
 
   try {
@@ -55,7 +54,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: rows, error } = await supabase
         .from('skills')
         .select('id, name, description')
-        .is('embedding', null)
+        .filter('embedding', 'is', null)
         .order('id')
         .limit(BATCH_SIZE)
 
@@ -75,7 +74,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         else updated++
       }
 
-      const { count } = await supabase.from('skills').select('id', { count: 'exact', head: true }).is('embedding', null)
+      const { count } = await supabase
+        .from('skills')
+        .select('id', { count: 'exact', head: true })
+        .filter('embedding', 'is', null)
+
       return res.status(200).json({
         ok: true, done: (count ?? 0) === 0, table, embedded: updated,
         remaining: count ?? 0, errors: errors.length ? errors : undefined,
@@ -86,7 +89,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: rows, error } = await supabase
       .from('items')
       .select('id, name, description, raw_bonus')
-      .is('embedding', null)
+      .filter('embedding', 'is', null)
       .order('id')
       .limit(BATCH_SIZE)
 
@@ -111,7 +114,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       else updated++
     }
 
-    const { count } = await supabase.from('items').select('id', { count: 'exact', head: true }).is('embedding', null)
+    const { count } = await supabase
+      .from('items')
+      .select('id', { count: 'exact', head: true })
+      .filter('embedding', 'is', null)
+
     return res.status(200).json({
       ok: true, done: (count ?? 0) === 0, table, embedded: updated,
       remaining: count ?? 0, errors: errors.length ? errors : undefined,
