@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY as string
 );
 
-// Mapa: function ID do Divine Pride → stat interno do banco
+// Mapa: function ID do Divine Pride -> stat interno do banco
 const FUNCTION_TO_STAT: Record<number, string> = {
   // Stats base
   1:   'str',   2:   'agi',   3:  'vit',
@@ -52,7 +52,7 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
 
   // 2. Scraping
   const res = await fetch(`https://www.divine-pride.net/database/item/${itemId}`, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RO-Build-Simulator/1.0)' }
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
   });
 
   if (!res.ok) throw new Error(`DP scrape failed: ${res.status}`);
@@ -62,10 +62,12 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
   const bonuses: ScrapedBonus[] = [];
 
   // 3. Extrai a secao Scripts
-  $('legend').each((_, legend) => {
-    if ($(legend).text().trim() !== 'Scripts') return;
+  // A legend do item tem classe entry-title, a legend Scripts nao tem classe
+  $('legend:not(.entry-title)').each((_, legend) => {
+    if (!$(legend).text().trim().includes('Scripts')) return;
 
-    $(legend).siblings('ul').find('li').each((_, li) => {
+    // O ul eirmao da legend dentro do mesmo div pai
+    $(legend).parent().find('ul li').each((_, li) => {
       const $li         = $(li);
       const description = $li.text().trim();
       const href        = $li.find('a').attr('href') ?? '';
@@ -89,7 +91,7 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
     });
   });
 
-  // 4. Salva no cache
+  // 4. Salva no cache (forcando refresh)
   await supabase.from('dp_item_cache').upsert({
     item_id:    itemId,
     data:       { bonuses },
