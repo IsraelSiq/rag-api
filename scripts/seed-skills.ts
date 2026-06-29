@@ -27,33 +27,45 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
 const args    = process.argv.slice(2)
 const DRY_RUN = args.includes('--dry-run')
 const RESET   = args.includes('--reset')
-const LIMIT   = (() => { const l = args.find(a => a.startsWith('--limit=')); return l ? parseInt(l.split('=')[1]) : Infinity })() 
+const LIMIT   = (() => {
+  const l = args.find(a => a.startsWith('--limit='))
+  return l ? parseInt(l.split('=')[1]) : Infinity
+})()
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-// URL do skill_db.yml no rAthena GitHub
 const SKILL_DB_URL = 'https://raw.githubusercontent.com/rathena/rathena/master/db/re/skill_db.yml'
 
-// ───────────────────────────────────────────────
-// Mapa: prefixo da skill ID → job_id da tabela jobs
-// (usado como fallback — skill_db.yml não tem job explícito)
+// ────────────────────────────────────────────────
+// Formato real do skill_db.yml:
+//
+// Body:
+//   - Id: 1
+//     Name: NV_BASIC          <-- este é o AegisName
+//     Description: Basic Skill
+//     MaxLevel: 9
+//     Type: Weapon            <-- opcional
+//
+// O campo "Name" é o AegisName (ex: SM_BASH, WZ_METEOR).
+// "Description" é o nome human-readable.
+// ────────────────────────────────────────────────
+
 const SKILL_PREFIX_TO_JOB: Array<[RegExp, string]> = [
-  // Novice / Basic
   [/^NV_/i,  'novice'],
   [/^SM_/i,  'swordman'],
   [/^MG_/i,  'mage'],
-  [/^AC_/i,  'archer'],
   [/^AL_/i,  'acolyte'],
   [/^MC_/i,  'merchant'],
   [/^TF_/i,  'thief'],
-  // 2nd jobs
+  // Archer prefix é AC_ e HT_
+  [/^HT_/i,  'hunter'],
+  [/^BA_/i,  'bard'],
+  [/^DC_/i,  'dancer'],
+  // 2nd
   [/^KN_/i,  'knight'],
   [/^CR_/i,  'crusader'],
   [/^WZ_/i,  'wizard'],
   [/^SA_/i,  'sage'],
-  [/^HT_/i,  'hunter'],
-  [/^BA_/i,  'bard'],
-  [/^DC_/i,  'dancer'],
   [/^PR_/i,  'priest'],
   [/^MO_/i,  'monk'],
   [/^BS_/i,  'blacksmith'],
@@ -70,13 +82,11 @@ const SKILL_PREFIX_TO_JOB: Array<[RegExp, string]> = [
   [/^HP_/i,  'high_priest'],
   [/^CH_/i,  'champion'],
   [/^WS_/i,  'mastersmith'],
-  [/^CR_/i,  'creator'],
   [/^SG_/i,  'star_gladiator'],
   [/^SL_/i,  'soul_linker'],
   [/^ST_/i,  'stalker'],
-  // 3rd jobs
+  // 3rd
   [/^RK_/i,  'rune_knight'],
-  [/^RG_/i,  'royal_guard'],
   [/^WL_/i,  'warlock'],
   [/^SO_/i,  'sorcerer'],
   [/^GS_/i,  'gunslinger'],
@@ -95,10 +105,9 @@ const SKILL_PREFIX_TO_JOB: Array<[RegExp, string]> = [
   [/^RL_/i,  'rebellion'],
   [/^SX_/i,  'star_emperor'],
   [/^SP_/i,  'soul_reaper'],
-  // 4th jobs
+  // 4th
   [/^DK_/i,  'dragon_knight'],
-  [/^MS_/i,  'meister'],
-  [/^AM_/i,  'arch_mage'],
+  [/^MADO_/i,'meister'],
   [/^EM_/i,  'elemental_master'],
   [/^WH_/i,  'wind_hawk'],
   [/^TR_/i,  'troubadour'],
@@ -106,148 +115,167 @@ const SKILL_PREFIX_TO_JOB: Array<[RegExp, string]> = [
   [/^IQ_/i,  'inquisitor'],
   [/^IG_/i,  'imperial_guard'],
   [/^BO_/i,  'biolo'],
-  [/^AC_/i,  'abyss_chaser'],
   [/^NW_/i,  'night_watch'],
-  [/^SE_/i,  'sky_emperor'],
-  [/^SCA_/i, 'soul_ascetic'],
   [/^SHR_/i, 'shinkiro'],
   [/^SHI_/i, 'shiranui'],
+  // Archer/AC shared (last, para não conflitar com acolyte)
+  [/^AC_/i,  'archer'],
 ]
 
-// Mapa explícito de type do rAthena → tipo normalizado
 const TYPE_MAP: Record<string, 'active' | 'passive' | 'toggle'> = {
-  'Passive':    'passive',
-  'Active':     'active',
-  'Toggle':     'toggle',
-  'Magic':      'active',
-  'Weapon':     'active',
-  'Ground':     'active',
-  'Trap':       'active',
-  'Self':       'active',
-  'Support':    'active',
-  'Neutral':    'active',
+  Passive:  'passive',
+  Active:   'active',
+  Toggle:   'toggle',
+  Magic:    'active',
+  Weapon:   'active',
+  Misc:     'active',
+  Ground:   'active',
+  Support:  'active',
+  Neutral:  'active',
 }
 
-// ── Helpers ─────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────
 
 function fetchText(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     https.get(url, res => {
-      // Follow redirects
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return fetchText(res.headers.location).then(resolve).catch(reject)
       }
       const chunks: Buffer[] = []
       res.on('data', (c: Buffer) => chunks.push(c))
-      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+      res.on('end',  () => resolve(Buffer.concat(chunks).toString('utf8')))
       res.on('error', reject)
     }).on('error', reject)
   })
 }
 
-/**
- * Parser minimalista de YAML skill_db.yml do rAthena.
- * Não usa lib externa — extrai blocos por indentação.
- */
 interface RawSkill {
-  Id:        string
-  Name:      string
-  MaxLevel:  number
-  Type?:     string
-  Element?:  string
-  Description?: string
+  aegisName:   string   // Name field = AegisName (ex: SM_BASH)
+  humanName:   string   // Description field = display name
+  maxLevel:    number
+  type?:       string
+  element?:    string
 }
 
+/**
+ * Parser do skill_db.yml do rAthena.
+ *
+ * Estrutura real:
+ *   Body:
+ *     - Id: 1
+ *       Name: NV_BASIC          <- AegisName
+ *       Description: Basic Skill <- display name
+ *       MaxLevel: 9
+ *       Type: Weapon             <- opcional
+ *       Element: Fire            <- opcional (top-level ou dentro de array)
+ */
 function parseSkillDb(yaml: string): RawSkill[] {
+  // Extrai somente o bloco Body:
+  const bodyStart = yaml.indexOf('\nBody:')
+  if (bodyStart === -1) {
+    console.error('  Parser: não encontrou "Body:" no YAML!')
+    return []
+  }
+  const body = yaml.slice(bodyStart)
+
   const skills: RawSkill[] = []
-  // Cada skill começa com "  - Id: NNNN"
-  const blocks = yaml.split(/\n(?=\s{2}-\s+Id:)/)
 
-  for (const block of blocks) {
-    const idMatch       = block.match(/^\s*-?\s*Id:\s*(\d+)/m)
-    const nameMatch     = block.match(/^\s+Name:\s+['"]?([^'"\n]+)['"]?/m)
-    const aegisMatch    = block.match(/^\s+AegisName:\s+['"]?([\w]+)['"]?/m)
-    const maxLvlMatch   = block.match(/^\s+MaxLevel:\s+(\d+)/m)
-    const typeMatch     = block.match(/^\s+Type:\s+([\w]+)/m)
-    const elementMatch  = block.match(/^\s+Element:\s+Ele_(\w+)/m)
-    const descMatch     = block.match(/^\s+Description:\s+['"]?([^'"\n]+)/m)
+  // Divide por cada entrada de skill: linha começando com "  - Id:"
+  // O padrão usa lookbehind para não consumir o delimitador
+  const entries = body.split(/(?=^  - Id:)/m).slice(1) // slice(1) pula o "Body:" sozinho
 
-    if (!idMatch || !aegisMatch) continue
+  for (const entry of entries) {
+    // Name (AegisName)
+    const nameMatch    = entry.match(/^    Name:\s+(\S+)/m)
+    // Description (human-readable)
+    const descMatch    = entry.match(/^    Description:\s+(.+)$/m)
+    // MaxLevel
+    const levelMatch   = entry.match(/^    MaxLevel:\s+(\d+)/m)
+    // Type (top-level, 4 spaces indent)
+    const typeMatch    = entry.match(/^    Type:\s+(\w+)/m)
+    // Element: pode ser "Element: Fire" (top-level) ou dentro de array (ignoramos arrays)
+    const elementMatch = entry.match(/^    Element:\s+(\w+)$/m)
+
+    if (!nameMatch) continue
 
     skills.push({
-      Id:          aegisMatch[1],           // usa AegisName como ID (ex: "SM_BASH")
-      Name:        nameMatch?.[1]?.trim() ?? aegisMatch[1],
-      MaxLevel:    maxLvlMatch  ? parseInt(maxLvlMatch[1])  : 1,
-      Type:        typeMatch?.[1],
-      Element:     elementMatch?.[1]?.toLowerCase(),
-      Description: descMatch?.[1]?.trim(),
+      aegisName: nameMatch[1].trim(),
+      humanName: descMatch?.[1]?.trim() ?? nameMatch[1].trim(),
+      maxLevel:  levelMatch ? parseInt(levelMatch[1]) : 1,
+      type:      typeMatch?.[1],
+      element:   elementMatch?.[1]?.toLowerCase(),
     })
   }
 
   return skills
 }
 
-function resolveJobId(skillId: string): string | null {
+function resolveJobId(aegisName: string): string | null {
   for (const [pattern, jobId] of SKILL_PREFIX_TO_JOB) {
-    if (pattern.test(skillId)) return jobId
+    if (pattern.test(aegisName)) return jobId
   }
   return null
 }
 
 function resolveType(raw?: string): 'active' | 'passive' | 'toggle' {
-  if (!raw) return 'active'
+  if (!raw) return 'passive'  // sem Type = passiva (mastery, etc.)
   return TYPE_MAP[raw] ?? 'active'
 }
 
-// ── Main ───────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────
+
 async function main() {
   console.log('\n🔧  seed-skills.ts')
   console.log(`   Modo  : ${DRY_RUN ? 'DRY RUN' : 'PRODUÇÃO'}`)
   if (isFinite(LIMIT)) console.log(`   Limite: ${LIMIT} skills`)
   console.log('')
 
-  // 1. Download
   console.log('⬇️   Baixando skill_db.yml do rAthena GitHub...')
   const yaml = await fetchText(SKILL_DB_URL)
   console.log(`   ✔ ${yaml.split('\n').length.toLocaleString()} linhas baixadas.\n`)
 
-  // 2. Parse
   let raw = parseSkillDb(yaml)
   console.log(`📝  ${raw.length.toLocaleString()} skills encontradas no rAthena.`)
 
+  if (raw.length === 0) {
+    console.error('  Nenhuma skill parseada. Verifique o formato do YAML.')
+    process.exit(1)
+  }
+
   if (isFinite(LIMIT)) raw = raw.slice(0, LIMIT)
 
-  // 3. Enriquecer com job_id
   const skills = raw.map(s => ({
-    id:          s.Id,
-    name:        s.Name,
-    max_level:   s.MaxLevel,
-    type:        resolveType(s.Type),
-    element:     s.Element ?? null,
-    description: s.Description ?? '',
-    job_id:      resolveJobId(s.Id),
+    id:          s.aegisName,
+    name:        s.humanName,
+    max_level:   s.maxLevel,
+    type:        resolveType(s.type),
+    element:     s.element ?? null,
+    description: s.humanName,
+    job_id:      resolveJobId(s.aegisName),
     requires:    [],
   }))
 
-  // Stats de cobertura
   const withJob    = skills.filter(s => s.job_id).length
   const withoutJob = skills.length - withJob
-  const byType     = skills.reduce((acc, s) => { acc[s.type] = (acc[s.type] ?? 0) + 1; return acc }, {} as Record<string, number>)
+  const byType     = skills.reduce((acc, s) => {
+    acc[s.type] = (acc[s.type] ?? 0) + 1
+    return acc
+  }, {} as Record<string, number>)
 
   console.log(`   Com job_id   : ${withJob}`)
   console.log(`   Sem job_id   : ${withoutJob} (shared/misc skills)`)
-  console.log(`   Tipos: ${Object.entries(byType).map(([k,v]) => `${k}=${v}`).join(' | ')}\n`)
+  console.log(`   Tipos: ${Object.entries(byType).map(([k, v]) => `${k}=${v}`).join(' | ')}\n`)
 
   if (DRY_RUN) {
-    console.log('💡 Dry run — primeiras 10 skills:')
-    skills.slice(0, 10).forEach(s =>
-      console.log(`  [${s.type.padEnd(7)}] ${s.id.padEnd(25)} lv${s.max_level} job=${s.job_id ?? 'n/a'}`)
+    console.log('💡 Dry run — primeiras 15 skills:')
+    skills.slice(0, 15).forEach(s =>
+      console.log(`  [${s.type.padEnd(7)}] ${s.id.padEnd(28)} "${s.name}" lv${s.max_level} job=${s.job_id ?? 'n/a'}`)
     )
     console.log('\n💡 Nada foi gravado.')
     return
   }
 
-  // 4. Reset opcional
   if (RESET) {
     console.log('🗑️  Removendo skills existentes...')
     const { error } = await supabase.from('skills').delete().neq('id', '__never__')
@@ -255,8 +283,7 @@ async function main() {
     else console.log('   ✔ Removidas.\n')
   }
 
-  // 5. Upsert em batches de 200
-  const BATCH = 200
+  const BATCH  = 200
   let inserted = 0
   let skipped  = 0
   const errors: string[] = []
@@ -264,24 +291,17 @@ async function main() {
   for (let i = 0; i < skills.length; i += BATCH) {
     const batch = skills.slice(i, i + BATCH)
 
-    // Skills com job_id devem ter FK válida — filtramos as que não têm
-    // (job_id null é ok, FK só restringe valores não-nulos)
     const { error } = await supabase
       .from('skills')
       .upsert(batch, { onConflict: 'id' })
 
     if (error) {
-      // Se o batch falhou, tenta um por um para isolar o erro
       for (const skill of batch) {
         const { error: e2 } = await supabase
           .from('skills')
           .upsert(skill, { onConflict: 'id' })
-        if (e2) {
-          errors.push(`${skill.id}: ${e2.message}`)
-          skipped++
-        } else {
-          inserted++
-        }
+        if (e2) { errors.push(`${skill.id}: ${e2.message}`); skipped++ }
+        else inserted++
       }
     } else {
       inserted += batch.length
@@ -298,12 +318,12 @@ async function main() {
   console.log(`  Ignoradas    : ${skipped}`)
   console.log(`  Erros        : ${errors.length}`)
 
-  if (errors.length > 0 && errors.length <= 20) {
-    console.log('\n⚠️  Primeiros erros:')
-    errors.slice(0, 20).forEach(e => console.log('  ', e))
+  if (errors.length > 0 && errors.length <= 30) {
+    console.log('\n⚠️  Erros:')
+    errors.slice(0, 30).forEach(e => console.log('  ', e))
   }
 
-  if (errors.length === 0 || inserted > 0) {
+  if (inserted > 0) {
     console.log(`\n✅  skills populado com sucesso!`)
     console.log(`   Próximo passo:`)
     console.log(`   POST /api/embed  (gerar embeddings dos itens)`)
