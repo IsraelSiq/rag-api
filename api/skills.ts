@@ -13,9 +13,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'GET') {
       const job_id = req.query.job_id as string | undefined
       const type = req.query.type as string | undefined
+      const search = req.query.search as string | undefined
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined
+      const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined
+
       let query = supabase.from('skills').select('*').order('name')
       if (job_id) query = query.eq('job_id', job_id)
       if (type) query = query.eq('type', type)
+      if (search) query = query.ilike('name', `%${search}%`)
+      if (offset !== undefined) query = query.range(offset, (offset + (limit ?? 50)) - 1)
+      else if (limit !== undefined) query = query.limit(limit)
+
       const { data, error } = await query
       if (error) return res.status(500).json({ error: error.message })
       return res.status(200).json(data)
