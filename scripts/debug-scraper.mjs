@@ -7,17 +7,21 @@ const res = await fetch('https://www.divine-pride.net/database/item/19499', {
 const html = await res.text();
 const $ = cheerio.load(html);
 
-console.log('legends encontradas:', $('legend').length);
 $('legend').each((i, el) => {
-  console.log(`legend ${i}:`, $(el).text().trim().substring(0, 60));
-});
+  if ($(el).text().trim() !== 'Scripts') return;
 
-console.log('\nul dentro de fieldset:', $('fieldset ul').length);
-console.log('li dentro de fieldset:', $('fieldset ul li').length);
+  console.log('--- Scripts legend encontrada ---');
+  const parent = $(el).parent();
+  console.log('parent tag:', parent.get(0).tagName);
+  console.log('parent html (500 chars):');
+  console.log($.html(parent).substring(0, 500));
 
-$('fieldset ul li').each((i, el) => {
-  const text = $(el).text().trim().substring(0, 80);
-  const href = $(el).find('a').attr('href') ?? 'no-href';
-  const fn   = href.match(/function=(\d+)/);
-  console.log(`li ${i} [fn=${fn ? fn[1] : 'none'}]:`, text);
+  console.log('\nsiblings:', $(el).siblings().map((i, s) => s.tagName).get());
+  console.log('siblings ul:', $(el).siblings('ul').length);
+  console.log('parent find ul:', parent.find('ul').length);
+  console.log('parent find li:', parent.find('li').length);
+
+  parent.find('li').each((i, li) => {
+    console.log(`li ${i}:`, $(li).text().trim().substring(0, 100));
+  });
 });
