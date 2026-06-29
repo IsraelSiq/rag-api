@@ -19,81 +19,80 @@ const FUNCTION_TO_STAT: Record<number, string> = {
   // ── HP / SP ─────────────────────────────────────────────────────────────
   7:   'hp',
   8:   'sp',
-  9:   'hp_percent',       // bonus bHPrate
-  71:  'sp_percent',       // bonus bSPrate
-  72:  'hp_regen',         // bonus bHPrecovRate
-  73:  'sp_regen',         // bonus bSPrecovRate
-  74:  'hp_regen_flat',    // bonus2 bHPRegenRate (valor fixo por tick)
-  75:  'sp_regen_flat',    // bonus2 bSPRegenRate
+  9:   'hp_percent',
+  71:  'sp_percent',
+  72:  'hp_regen',
+  73:  'sp_regen',
+  74:  'hp_regen_flat',
+  75:  'sp_regen_flat',
 
   // ── Combate ofensivo ────────────────────────────────────────────────────
   21:  'atk',
   22:  'matk',
-  23:  'atk_percent',      // bonus bAtkRate
-  24:  'matk_percent',     // bonus bMatkRate
-  17:  'aspd',             // bonus bAspd (reduz delay pos-ataque)
-  108: 'aspd_percent',     // bonus bAspdRate (% de ASPD)
-  30:  'long_range_atk',   // bonus bLongAtkRate (range attack %)
-  31:  'short_range_atk',  // bonus bNearAtkRate (melee attack %)
-  33:  'crit_dmg',         // bonus bCritAtkRate
-  34:  'skill_dmg',        // bonus bSkillAtk (% de dano de skill)
-  39:  'normal_atk_dmg',   // bonus bNormalAtkRes / bBaseAtk
+  23:  'atk_percent',
+  24:  'matk_percent',
+  17:  'aspd',
+  108: 'aspd_percent',
+  30:  'long_range_atk',
+  31:  'short_range_atk',
+  33:  'crit_dmg',
+  34:  'skill_dmg',
+  39:  'normal_atk_dmg',
 
   // ── Combate defensivo ───────────────────────────────────────────────────
   10:  'def',
   11:  'mdef',
-  13:  'def_percent',      // bonus bDefRate
-  15:  'mdef_percent',     // bonus bMdefRate
-  60:  'dmg_reduction',    // bonus bShortWeaponDamageReturn / misc reduction
-  61:  'ranged_reduction', // bonus bLongAtkDef
-  62:  'magic_reduction',  // bonus bMagicDef (% reducao magica)
+  13:  'def_percent',
+  15:  'mdef_percent',
+  60:  'dmg_reduction',
+  61:  'ranged_reduction',
+  62:  'magic_reduction',
 
   // ── Precisao / Evasao ───────────────────────────────────────────────────
   12:  'hit',
   14:  'crit',
   16:  'flee',
-  18:  'perfect_dodge',    // bonus bPerfectHit
+  18:  'perfect_dodge',
 
   // ── Cast / Delay ────────────────────────────────────────────────────────
   182: 'fixed_cast_reduction',
   183: 'variable_cast_reduction',
-  184: 'after_cast_delay',    // bonus bDelayRate (% reducao delay pos-skill)
-  185: 'cast_time_percent',   // bonus bCastrate
-  186: 'fixed_cast_flat',     // bonus2 bFixedCastrate (ms fixo)
+  184: 'after_cast_delay',
+  185: 'cast_time_percent',
+  186: 'fixed_cast_flat',
 
-  // ── Dano por tamanho (base — sobrescrito por resolveStatFromDescription) ─
+  // ── Dano por tamanho ────────────────────────────────────────────────────
   812: 'magical_dmg_size',
-  310: 'phys_dmg_size',        // bonus2 bSizeTolerance / bAddSize (fisico)
+  310: 'phys_dmg_size',
 
-  // ── Dano por raca (base — sobrescrito por resolveStatFromDescription) ───
-  311: 'phys_dmg_race',        // bonus2 bAddRace
-  813: 'magical_dmg_race',     // bonus2 bMagicAddRace
+  // ── Dano por raca ───────────────────────────────────────────────────────
+  311: 'phys_dmg_race',
+  813: 'magical_dmg_race',
 
-  // ── Dano por elemento (base — sobrescrito por resolveStatFromDescription)
-  55:  'dmg_element',          // bonus2 bAddEle (fisico)
-  224: 'magical_dmg_element',  // bonus2 bMagicAddEle
+  // ── Dano por elemento ───────────────────────────────────────────────────
+  55:  'dmg_element',
+  224: 'magical_dmg_element',
 
   // ── Reducao por raca / elemento / tamanho ───────────────────────────────
-  56:  'dmg_reduce_race',      // bonus2 bSubRace
-  57:  'dmg_reduce_element',   // bonus2 bSubEle
-  312: 'dmg_reduce_size',      // bonus2 bSubSize
+  56:  'dmg_reduce_race',
+  57:  'dmg_reduce_element',
+  312: 'dmg_reduce_size',
 
   // ── Refino ──────────────────────────────────────────────────────────────
-  200: 'refine_atk',           // bonus2 bOverRefAtk
-  201: 'refine_matk',          // bonus2 bOverRefMAtk
-  202: 'refine_def',           // bonus2 bOverRefDef
+  200: 'refine_atk',
+  201: 'refine_matk',
+  202: 'refine_def',
 
   // ── Misc ────────────────────────────────────────────────────────────────
-  100: 'exp_bonus',            // bonus bExpAddRace
-  101: 'drop_bonus',           // bonus bItemDropAdded
-  120: 'sp_cost_reduction',    // bonus bSpCostRate
-  121: 'heal_effectiveness',   // bonus bHealPower
-  122: 'received_heal',        // bonus bHealPower2
-  130: 'weapon_atk_bonus',     // bonus bWeaponAtk
-  131: 'status_atk',           // bonus bStatusAtk
+  100: 'exp_bonus',
+  101: 'drop_bonus',
+  120: 'sp_cost_reduction',
+  121: 'heal_effectiveness',
+  122: 'received_heal',
+  130: 'weapon_atk_bonus',
+  131: 'status_atk',
 };
 
-// ── Racas do Ragnarok (ordem do enum RC_* do rAthena) ────────────────────
 const RACE_KEYWORDS: [string, string][] = [
   ['formless',   'race_formless'],
   ['undead',     'race_undead'],
@@ -109,7 +108,6 @@ const RACE_KEYWORDS: [string, string][] = [
   ['player',     'race_player'],
 ];
 
-// ── Elementos do Ragnarok ─────────────────────────────────────────────────
 const ELEMENT_KEYWORDS: [string, string][] = [
   ['neutral',  'ele_neutral'],
   ['water',    'ele_water'],
@@ -123,16 +121,9 @@ const ELEMENT_KEYWORDS: [string, string][] = [
   ['undead',   'ele_undead'],
 ];
 
-/**
- * Para certos function IDs, o stat depende do conteudo da descricao.
- * fn=812 / fn=310 → Small / Medium / Large
- * fn=311 / fn=813 → Raca (Formless, Undead, Brute...)
- * fn=55  / fn=224 → Elemento (Neutral, Water, Fire...)
- */
 function resolveStatFromDescription(fnId: number, description: string): string {
   const desc = description.toLowerCase();
 
-  // Dano por tamanho
   if (fnId === 812 || fnId === 310) {
     const prefix = fnId === 812 ? 'magical_dmg_size' : 'phys_dmg_size';
     if (desc.includes('small'))  return `${prefix}_small`;
@@ -141,7 +132,6 @@ function resolveStatFromDescription(fnId: number, description: string): string {
     return prefix;
   }
 
-  // Dano por raca
   if (fnId === 311 || fnId === 813) {
     const prefix = fnId === 311 ? 'phys_dmg' : 'magical_dmg';
     for (const [kw, slug] of RACE_KEYWORDS) {
@@ -150,7 +140,6 @@ function resolveStatFromDescription(fnId: number, description: string): string {
     return fnId === 311 ? 'phys_dmg_race' : 'magical_dmg_race';
   }
 
-  // Dano por elemento
   if (fnId === 55 || fnId === 224) {
     const prefix = fnId === 55 ? 'phys_dmg' : 'magical_dmg';
     for (const [kw, slug] of ELEMENT_KEYWORDS) {
@@ -164,14 +153,13 @@ function resolveStatFromDescription(fnId: number, description: string): string {
 
 export interface ScrapedBonus {
   stat:        string;
-  value:       number | null;  // null = bonus existe mas valor e condicional/variavel
+  value:       number | null;
   description: string;
   condition:   string;
   function_id: number;
 }
 
 export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]> {
-  // 1. Checa cache no dp_item_cache
   const { data: cached } = await supabase
     .from('dp_item_cache')
     .select('data, fetched_at')
@@ -185,7 +173,6 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
     }
   }
 
-  // 2. Scraping
   const res = await fetch(`https://www.divine-pride.net/database/item/${itemId}`, {
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
   });
@@ -196,7 +183,6 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
   const $    = cheerio.load(html);
   const bonuses: ScrapedBonus[] = [];
 
-  // 3. Extrai a secao Scripts
   $('legend:not(.entry-title)').each((_, legend) => {
     if (!$(legend).text().trim().includes('Scripts')) return;
 
@@ -216,7 +202,6 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
       $li.find('.badge-warning').each((_, b) => values.push($(b).text().trim()));
       const numericVal = values.find(v => /^-?\d+/.test(v));
 
-      // null quando condicional sem badge fixo (valor variavel)
       const value: number | null = (isComplex && !numericVal)
         ? null
         : numericVal ? parseFloat(numericVal) : 0;
@@ -225,14 +210,12 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
     });
   });
 
-  // 4. Salva no cache
   await supabase.from('dp_item_cache').upsert({
     item_id:    itemId,
     data:       { bonuses },
     fetched_at: new Date().toISOString()
   });
 
-  // 5. Persiste em item_bonuses
   if (bonuses.length > 0) {
     await supabase.from('item_bonuses').delete().eq('item_id', itemId);
     await supabase.from('item_bonuses').insert(
@@ -249,7 +232,6 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
   return bonuses;
 }
 
-// Scraping em lote com rate limit (1 req/seg)
 export async function scrapeItemsBatch(itemIds: string[]): Promise<void> {
   for (const id of itemIds) {
     try {
@@ -258,6 +240,6 @@ export async function scrapeItemsBatch(itemIds: string[]): Promise<void> {
     } catch (e) {
       console.error(`err ${id}:`, e);
     }
-    await new Promise(r => setTimeout(r, 1100));
+    await new Promise<void>(r => setTimeout(r, 1100));
   }
 }

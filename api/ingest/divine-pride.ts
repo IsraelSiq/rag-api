@@ -71,7 +71,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue
         }
 
-        // @ts-ignore — supabase types derivados de Database não inferem corretamente sem gerador
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore — supabase types sem gerador não inferem tabelas customizadas
         const { error: upsertErr } = await supabase.from('items').upsert({
           id:          String(id),
           name:        dpItem.name,
@@ -99,13 +100,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             skill_mod: b.skill_mod ?? null,
           }))
 
-          // @ts-ignore — supabase types derivados de Database não inferem corretamente sem gerador
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore — supabase types sem gerador não inferem tabelas customizadas
           await supabase.from('item_bonuses').insert(rows)
         }
 
         report.inserted++
 
-        await new Promise(r => setTimeout(r, 1000))
+        await new Promise<void>(r => setTimeout(r, 1000))
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         report.errors.push(`#${id}: ${msg}`)
