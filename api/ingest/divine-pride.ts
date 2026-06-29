@@ -39,7 +39,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } = (req.body ?? {}) as { type?: number; ids?: number[]; dry_run?: boolean }
 
   const report = { inserted: 0, updated: 0, skipped: 0, errors: [] as string[] }
-  const supabase = getSupabase()
+  // cast para any: o cliente supabase sem Database genérico rejeita tabelas customizadas
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const supabase = getSupabase() as any
 
   try {
     let itemIds: number[] = []
@@ -51,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const list = await fetchItemsByType(type as DPItemType, {
         onPage: (items, page) => console.log(`[ingest] Página ${page}: ${items.length} itens`),
       })
-      itemIds = list.map(i => i.id)
+      itemIds = list.map((i: { id: number }) => i.id)
     } else {
       return res.status(400).json({ error: 'Informe type ou ids no body' })
     }
@@ -71,8 +73,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue
         }
 
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore — supabase types sem gerador não inferem tabelas customizadas
         const { error: upsertErr } = await supabase.from('items').upsert({
           id:          String(id),
           name:        dpItem.name,
@@ -91,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (bonuses.length > 0) {
           await supabase.from('item_bonuses').delete().eq('item_id', String(id))
 
-          const rows: ItemBonusInsert[] = bonuses.map(b => ({
+          const rows: ItemBonusInsert[] = bonuses.map((b: ItemBonusInsert) => ({
             item_id:   String(id),
             stat:      b.stat,
             value:     b.value,
@@ -100,8 +100,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             skill_mod: b.skill_mod ?? null,
           }))
 
-          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-          // @ts-ignore — supabase types sem gerador não inferem tabelas customizadas
           await supabase.from('item_bonuses').insert(rows)
         }
 

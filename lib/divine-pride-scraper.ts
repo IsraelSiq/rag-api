@@ -1,22 +1,19 @@
 import * as cheerio from 'cheerio';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const supabase = createClient<any>(
   process.env.SUPABASE_URL as string,
   process.env.SUPABASE_SERVICE_KEY as string
 );
 
-// Mapa: function ID do Divine Pride -> stat interno do banco
 const FUNCTION_TO_STAT: Record<number, string> = {
-  // ── Stats base ──────────────────────────────────────────────────────────
   1:   'str',
   2:   'agi',
   3:   'vit',
   4:   'int',
   5:   'dex',
   6:   'luk',
-
-  // ── HP / SP ─────────────────────────────────────────────────────────────
   7:   'hp',
   8:   'sp',
   9:   'hp_percent',
@@ -25,8 +22,6 @@ const FUNCTION_TO_STAT: Record<number, string> = {
   73:  'sp_regen',
   74:  'hp_regen_flat',
   75:  'sp_regen_flat',
-
-  // ── Combate ofensivo ────────────────────────────────────────────────────
   21:  'atk',
   22:  'matk',
   23:  'atk_percent',
@@ -38,8 +33,6 @@ const FUNCTION_TO_STAT: Record<number, string> = {
   33:  'crit_dmg',
   34:  'skill_dmg',
   39:  'normal_atk_dmg',
-
-  // ── Combate defensivo ───────────────────────────────────────────────────
   10:  'def',
   11:  'mdef',
   13:  'def_percent',
@@ -47,43 +40,27 @@ const FUNCTION_TO_STAT: Record<number, string> = {
   60:  'dmg_reduction',
   61:  'ranged_reduction',
   62:  'magic_reduction',
-
-  // ── Precisao / Evasao ───────────────────────────────────────────────────
   12:  'hit',
   14:  'crit',
   16:  'flee',
   18:  'perfect_dodge',
-
-  // ── Cast / Delay ────────────────────────────────────────────────────────
   182: 'fixed_cast_reduction',
   183: 'variable_cast_reduction',
   184: 'after_cast_delay',
   185: 'cast_time_percent',
   186: 'fixed_cast_flat',
-
-  // ── Dano por tamanho ────────────────────────────────────────────────────
   812: 'magical_dmg_size',
   310: 'phys_dmg_size',
-
-  // ── Dano por raca ───────────────────────────────────────────────────────
   311: 'phys_dmg_race',
   813: 'magical_dmg_race',
-
-  // ── Dano por elemento ───────────────────────────────────────────────────
   55:  'dmg_element',
   224: 'magical_dmg_element',
-
-  // ── Reducao por raca / elemento / tamanho ───────────────────────────────
   56:  'dmg_reduce_race',
   57:  'dmg_reduce_element',
   312: 'dmg_reduce_size',
-
-  // ── Refino ──────────────────────────────────────────────────────────────
   200: 'refine_atk',
   201: 'refine_matk',
   202: 'refine_def',
-
-  // ── Misc ────────────────────────────────────────────────────────────────
   100: 'exp_bonus',
   101: 'drop_bonus',
   120: 'sp_cost_reduction',
@@ -199,7 +176,8 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
       const condition = isComplex ? 'complex' : 'always';
 
       const values: string[] = [];
-      $li.find('.badge-warning').each((_, b) => values.push($(b).text().trim()));
+      // void explicito: Array.push retorna number, mas cheerio .each espera void|boolean
+      $li.find('.badge-warning').each((_, b) => { values.push($(b).text().trim()); });
       const numericVal = values.find(v => /^-?\d+/.test(v));
 
       const value: number | null = (isComplex && !numericVal)
