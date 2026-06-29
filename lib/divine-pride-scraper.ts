@@ -43,7 +43,7 @@ function resolveStatFromDescription(fnId: number, description: string): string {
 
 export interface ScrapedBonus {
   stat:        string;
-  value:       number;
+  value:       number | null;  // null = bonus existe mas valor e condicional/variavel
   description: string;
   condition:   string;
   function_id: number;
@@ -92,23 +92,26 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
       // Resolve stat considerando o conteudo da descricao (ex: Small/Medium/Large)
       const stat = resolveStatFromDescription(fnId, description);
 
+      // Condicao: se description contem per/when/if/equip -> complexa
+      const isComplex = /\bper\b|\bwhen\b|\bif\b|\bequip\b/i.test(description);
+      const condition = isComplex ? 'complex' : 'always';
+
       // Extrai valores numericos dos badges
       const values: string[] = [];
       $li.find('.badge-warning').each((_, b) => values.push($(b).text().trim()));
-
       const numericVal = values.find(v => /^-?\d+/.test(v));
-      const value      = numericVal ? parseFloat(numericVal) : 0;
 
-      // Condicao: se description contem per/when/if/equip -> complexa
-      const condition = /\bper\b|\bwhen\b|\bif\b|\bequip\b/i.test(description)
-        ? 'complex'
-        : 'always';
+      // value: null quando o bonus e condicional E nao tem badge fixo
+      // (o valor real depende de stats/refino/condicao do personagem)
+      const value: number | null = (isComplex && !numericVal)
+        ? null
+        : numericVal ? parseFloat(numericVal) : 0;
 
       bonuses.push({ stat, value, description, condition, function_id: fnId });
     });
   });
 
-  // 4. Salva no cache (forcando refresh)
+  // 4. Salva no cache
   await supabase.from('dp_item_cache').upsert({
     item_id:    itemId,
     data:       { bonuses },
@@ -122,7 +125,7 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
       bonuses.map(b => ({
         item_id:   itemId,
         stat:      b.stat,
-        value:     Math.round(b.value),
+        value:     b.value !== null ? Math.round(b.value) : null,
         condition: b.condition,
         is_card:   false,
       }))
