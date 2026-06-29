@@ -49,6 +49,22 @@ async function generateAnswer(systemPrompt: string, userPrompt: string): Promise
   return { text, tokens }
 }
 
+/**
+ * Formata os bonuses de um item em texto legivel para o LLM.
+ * - value numerico: "stat +X"
+ * - value null (condicional): usa a description completa
+ */
+function formatBonuses(bonuses: any[]): string {
+  return bonuses.map(b => {
+    if (b.value === null) {
+      // Bonus condicional: description tem toda a informacao
+      return `  • [condicional] ${b.description}`
+    }
+    const sign = b.value >= 0 ? '+' : ''
+    return `  • ${b.stat} ${sign}${b.value}${ b.condition === 'complex' ? ' (condicional)' : '' }`
+  }).join('\n')
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   cors(res)
   if (handleOptions(req, res)) return
@@ -115,39 +131,69 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       items  = iRes.data ?? []
     }
 
-    // 3. Montar prompts
+    // 3. Buscar item_bonuses dos itens encontrados
+    const itemIds = items.map(i => String(i.id))
+    let bonusesByItem: Record<string, any[]> = {}
+
+    if (itemIds.length > 0) {
+      const { data: bonusRows } = await supabase
+        .from('item_bonuses')
+        .select('item_id, stat, value, condition, description')
+        .in('item_id', itemIds)
+
+      if (bonusRows) {
+        for (const row of bonusRows) {
+          const key = String(row.item_id)
+          if (!bonusesByItem[key]) bonusesByItem[key] = []
+          bonusesByItem[key].push(row)
+        }
+      }
+    }
+
+    // 4. Montar prompts
     const skillsCtx = skills.map(s =>
       `- ${s.name} (${s.type ?? ''}, job: ${s.job_id ?? '?'}): ${(s.description ?? '').slice(0, 120)}`
     ).join('\n')
 
-    const itemsCtx = items.map(i =>
-      `- ${i.name}: ${(i.description ?? '').slice(0, 120)}`
-    ).join('\n')
+    const itemsCtx = items.map(i => {
+      const id      = String(i.id)
+      const bonuses = bonusesByItem[id] ?? []
+      const bonusTxt = bonuses.length > 0
+        ? `\n${formatBonuses(bonuses)}`
+        : ''
+      return `- ${i.name}: ${(i.description ?? '').slice(0, 120)}${bonusTxt}`
+    }).join('\n')
 
     const systemPrompt = `Você é um especialista em builds de Ragnarok Online (versão Renewal/kRO).
 Responda sempre em ${lang === 'pt' ? 'português do Brasil' : 'English'}.
 Baseie-se nos dados fornecidos. Seja direto, prático e específico.
+Os equipamentos listados incluem seus bônus reais (scrapeados do Divine Pride).
+Bônus marcados como [condicional] dependem de refino, stats ou condições especiais — leve em conta ao recomendar.
 Estrutura da resposta:
 1. Resumo da build (1-2 frases)
 2. Skills recomendadas (com níveis sugeridos e motivo)
-3. Equipamentos recomendados (com motivo)
+3. Equipamentos recomendados (com motivo e bônus relevantes)
 4. Distribuição de atributos (STR/AGI/VIT/INT/DEX/LUK)
 5. Dicas finais`
 
-    const userPrompt = `Job: ${job}\nObjetivo: ${goal}\n\nSkills disponíveis no contexto:\n${skillsCtx || 'Nenhuma encontrada.'}\n\nEquipamentos disponíveis no contexto:\n${itemsCtx || 'Nenhum encontrado.'}`
+    const userPrompt = `Job: ${job}\nObjetivo: ${goal}\n\nSkills disponíveis no contexto:\n${skillsCtx || 'Nenhuma encontrada.'}\n\nEquipamentos disponíveis no contexto (com bônus):\n${itemsCtx || 'Nenhum encontrado.'}`
 
-    // 4. Gerar resposta com Cohere Command R+
+    // 5. Gerar resposta com Cohere Command R+
     const { text: answer, tokens } = await generateAnswer(systemPrompt, userPrompt)
 
     const response = {
       job, goal, lang,
       answer,
-      context: { skills_used: skills.length, items_used: items.length },
+      context: {
+        skills_used: skills.length,
+        items_used:  items.length,
+        bonuses_used: Object.values(bonusesByItem).flat().length,
+      },
       usage: tokens,
       cached: false,
     }
 
-    // 5. Salvar no cache
+    // 6. Salvar no cache
     await supabase.from('advisor_cache').insert({
       cache_key: cacheKey,
       job,
