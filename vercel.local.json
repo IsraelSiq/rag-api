@@ -1,0 +1,28 @@
+{
+  "devCommand": null,
+  "rewrites": [
+    { "source": "/api/health", "destination": "/api/health" },
+    { "source": "/api/jobs", "destination": "/api/jobs" },
+    { "source": "/api/jobs/:id", "destination": "/api/jobs/:id" },
+    { "source": "/api/skills", "destination": "/api/skills" },
+    { "source": "/api/skills/:id", "destination": "/api/skills/:id" },
+    { "source": "/api/search", "destination": "/api/search" },
+    { "source": "/api/embed", "destination": "/api/embed" },
+    { "source": "/api/seed", "destination": "/api/seed" },
+    { "source": "/api/docs", "destination": "/api/docs" },
+    { "source": "/api/swagger", "destination": "/api/swagger" },
+    { "source": "/api/items", "destination": "/api/items" },
+    { "source": "/api/items/:id", "destination": "/api/items/:id" },
+    { "source": "/api/ingest/divine-pride", "destination": "/api/ingest/divine-pride" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+      ]
+    }
+  ]
+}
