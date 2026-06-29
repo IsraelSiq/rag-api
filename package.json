@@ -3,7 +3,8 @@
   "version": "3.0.0",
   "description": "RO Skill Simulator API — Vercel Functions + Supabase",
   "scripts": {
-    "dev": "vercel dev"
+    "dev": "vercel dev",
+    "dev:local": "vercel dev --local-config vercel.local.json"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.4",
