@@ -7,13 +7,13 @@ const SYNONYMS: Record<string, string[]> = {
   cura:           ['cura', 'recupera', 'restaura', 'revive', 'ressuscita', 'heal', 'absorve'],
   dano:           ['dano', 'ataque', 'golpe', 'dispara', 'explode', 'perfura'],
   veneno:         ['veneno', 'envenenado', 'venenoso', 'toxina'],
-  invisivel:      ['invis\u00edvel', 'invisibilidade', 'hiding', 'oculto', 'cloaking'],
+  invisivel:      ['invisível', 'invisibilidade', 'hiding', 'oculto', 'cloaking'],
   teletransporte: ['teletransporte', 'teletransporta', 'portal', 'warp'],
-  buff:           ['buff', 'aumenta', 'b\u00f4nus', 'fortalece', 'incrementa'],
-  aoe:            ['aoe', '\u00e1rea', 'ao redor', 'todos os inimigos', 'chuva'],
+  buff:           ['buff', 'aumenta', 'bônus', 'fortalece', 'incrementa'],
+  aoe:            ['aoe', 'área', 'ao redor', 'todos os inimigos', 'chuva'],
   stun:           ['stun', 'atordoa', 'paralisa'],
-  sagrado:        ['sagrado', 'holy', 'divino', 'b\u00ean\u00e7\u00e3o'],
-  escudo:         ['escudo', 'bloqueia', 'absorve', 'barreira', 'prote\u00e7\u00e3o'],
+  sagrado:        ['sagrado', 'holy', 'divino', 'bênção'],
+  escudo:         ['escudo', 'bloqueia', 'absorve', 'barreira', 'proteção'],
 }
 
 function expandQuery(q: string): string[] {
@@ -23,17 +23,22 @@ function expandQuery(q: string): string[] {
 
 async function getEmbedding(text: string): Promise<number[] | null> {
   try {
-    const res = await fetch('https://api.openai.com/v1/embeddings', {
+    const res = await fetch('https://api.cohere.com/v2/embed', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${process.env.COHERE_API_KEY}`,
       },
-      body: JSON.stringify({ model: 'text-embedding-3-small', input: text }),
+      body: JSON.stringify({
+        model: 'embed-multilingual-v3.0',
+        texts: [text],
+        input_type: 'search_query',
+        embedding_types: ['float'],
+      }),
     })
     if (!res.ok) return null
-    const json = await res.json() as { data: { embedding: number[] }[] }
-    return json.data[0].embedding
+    const json = await res.json()
+    return json.embeddings.float[0]
   } catch {
     return null
   }
@@ -60,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const supabase = getSupabase()
     const select = 'id, name, type, element, max_level, description, job_id, requires'
 
-    if (process.env.OPENAI_API_KEY) {
+    if (process.env.COHERE_API_KEY) {
       const embedding = await getEmbedding(q)
       if (embedding) {
         const { data: semanticData, error: semanticError } = await supabase.rpc('match_skills', {

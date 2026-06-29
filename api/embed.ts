@@ -4,20 +4,25 @@ import { getSupabase } from '../lib/supabase'
 import { cors, handleOptions } from '../lib/helpers'
 
 async function getEmbedding(text: string): Promise<number[]> {
-  const res = await fetch('https://api.openai.com/v1/embeddings', {
+  const res = await fetch('https://api.cohere.com/v2/embed', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${process.env.COHERE_API_KEY}`,
     },
-    body: JSON.stringify({ model: 'text-embedding-3-small', input: text }),
+    body: JSON.stringify({
+      model: 'embed-multilingual-v3.0',
+      texts: [text],
+      input_type: 'search_document',
+      embedding_types: ['float'],
+    }),
   })
   if (!res.ok) {
     const err = await res.text()
-    throw new Error(`OpenAI error: ${err}`)
+    throw new Error(`Cohere error: ${err}`)
   }
   const json = await res.json()
-  return json.data[0].embedding
+  return json.embeddings.float[0]
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -34,8 +39,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: 'Unauthorized.' })
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: 'OPENAI_API_KEY not configured.' })
+  if (!process.env.COHERE_API_KEY) {
+    return res.status(500).json({ error: 'COHERE_API_KEY not configured.' })
   }
 
   try {
