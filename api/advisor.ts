@@ -23,6 +23,32 @@ async function getEmbedding(text: string): Promise<number[] | null> {
   } catch { return null }
 }
 
+async function generateAnswer(systemPrompt: string, userPrompt: string): Promise<{ text: string; tokens: object }> {
+  const res = await fetch('https://api.cohere.com/v2/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.COHERE_API_KEY}` },
+    body: JSON.stringify({
+      model: 'command-r-plus',
+      temperature: 0.4,
+      max_tokens: 1200,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userPrompt   },
+      ],
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Cohere chat error: ${err}`)
+  }
+
+  const json = await res.json()
+  const text = json.message?.content?.[0]?.text ?? json.text ?? ''
+  const tokens = json.usage ?? {}
+  return { text, tokens }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   cors(res)
   if (handleOptions(req, res)) return
@@ -34,14 +60,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: '"job" e "goal" são obrigatórios.' })
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: 'OPENAI_API_KEY não configurada.' })
+  if (!process.env.COHERE_API_KEY) {
+    return res.status(500).json({ error: 'COHERE_API_KEY não configurada.' })
   }
 
   try {
-    const supabase   = getSupabase()
-    const cacheKey   = `${job}::${goal}::${lang}`.toLowerCase()
-    const cutoff     = new Date(Date.now() - CACHE_TTL_DAYS * 86400_000).toISOString()
+    const supabase = getSupabase()
+    const cacheKey = `${job}::${goal}::${lang}`.toLowerCase()
+    const cutoff   = new Date(Date.now() - CACHE_TTL_DAYS * 86400_000).toISOString()
 
     // 1. Checar cache
     const { data: cached } = await supabase
@@ -58,8 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 2. Buscar contexto via RAG
-    const query     = `${job} ${goal}`
-    const embedding = process.env.COHERE_API_KEY ? await getEmbedding(query) : null
+    const embedding = await getEmbedding(`${job} ${goal}`)
 
     let skills: any[] = []
     let items: any[]  = []
@@ -81,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       skills = sRes.data ?? []
       items  = iRes.data ?? []
     } else {
-      // Fallback sem embedding: busca por nome do job
+      // Fallback sem embedding
       const [sRes, iRes] = await Promise.all([
         supabase.from('skills').select('id, name, type, description, job_id').ilike('job_id', `%${job}%`).limit(15),
         supabase.from('items').select('id, name, description').limit(15),
@@ -90,7 +115,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       items  = iRes.data ?? []
     }
 
-    // 3. Montar contexto para o prompt
+    // 3. Montar prompts
     const skillsCtx = skills.map(s =>
       `- ${s.name} (${s.type ?? ''}, job: ${s.job_id ?? '?'}): ${(s.description ?? '').slice(0, 120)}`
     ).join('\n')
@@ -111,29 +136,8 @@ Estrutura da resposta:
 
     const userPrompt = `Job: ${job}\nObjetivo: ${goal}\n\nSkills disponíveis no contexto:\n${skillsCtx || 'Nenhuma encontrada.'}\n\nEquipamentos disponíveis no contexto:\n${itemsCtx || 'Nenhum encontrado.'}`
 
-    // 4. Chamar GPT-4o
-    const gptRes = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        temperature: 0.4,
-        max_tokens: 1200,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userPrompt   },
-        ],
-      }),
-    })
-
-    if (!gptRes.ok) {
-      const err = await gptRes.text()
-      return res.status(502).json({ error: `OpenAI error: ${err}` })
-    }
-
-    const gpt       = await gptRes.json()
-    const answer    = gpt.choices?.[0]?.message?.content ?? ''
-    const tokens    = gpt.usage ?? {}
+    // 4. Gerar resposta com Cohere Command R+
+    const { text: answer, tokens } = await generateAnswer(systemPrompt, userPrompt)
 
     const response = {
       job, goal, lang,
