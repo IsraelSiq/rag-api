@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getSupabase } from '../lib/supabase'
 import { cors, handleOptions } from '../lib/helpers'
 
-const BATCH_SIZE = 96 // Cohere supports up to 96 texts per call
+const BATCH_SIZE = 96
 
 async function getEmbeddings(texts: string[]): Promise<number[][]> {
   const res = await fetch('https://api.cohere.com/v2/embed', {
@@ -45,54 +45,76 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'COHERE_API_KEY not configured.' })
   }
 
+  // ?table=items  ou  ?table=skills (default)
+  const table = ((req.query.table as string) ?? 'skills') === 'items' ? 'items' : 'skills'
+
   try {
     const supabase = getSupabase()
 
-    const { data: skills, error } = await supabase
-      .from('skills')
-      .select('id, name, description')
+    if (table === 'skills') {
+      const { data: rows, error } = await supabase
+        .from('skills')
+        .select('id, name, description')
+        .is('embedding', null)
+        .order('id')
+        .limit(BATCH_SIZE)
+
+      if (error) return res.status(500).json({ error: error.message })
+      if (!rows || rows.length === 0) {
+        return res.status(200).json({ ok: true, done: true, table, message: 'Todos os embeddings de skills já foram gerados!' })
+      }
+
+      const texts = rows.map(s => `${s.name}: ${s.description ?? ''}`)
+      const embeddings = await getEmbeddings(texts)
+
+      let updated = 0
+      const errors: string[] = []
+      for (let i = 0; i < rows.length; i++) {
+        const { error: e } = await supabase.from('skills').update({ embedding: embeddings[i] } as any).eq('id', rows[i].id)
+        if (e) errors.push(`${rows[i].id}: ${e.message}`)
+        else updated++
+      }
+
+      const { count } = await supabase.from('skills').select('id', { count: 'exact', head: true }).is('embedding', null)
+      return res.status(200).json({
+        ok: true, done: (count ?? 0) === 0, table, embedded: updated,
+        remaining: count ?? 0, errors: errors.length ? errors : undefined,
+      })
+    }
+
+    // table === 'items'
+    const { data: rows, error } = await supabase
+      .from('items')
+      .select('id, name, description, raw_bonus')
       .is('embedding', null)
       .order('id')
       .limit(BATCH_SIZE)
 
     if (error) return res.status(500).json({ error: error.message })
-    if (!skills || skills.length === 0) {
-      return res.status(200).json({ ok: true, done: true, message: 'Todos os embeddings já foram gerados!' })
+    if (!rows || rows.length === 0) {
+      return res.status(200).json({ ok: true, done: true, table, message: 'Todos os embeddings de items já foram gerados!' })
     }
 
-    // Build texts array and call Cohere once for all
-    const texts = skills.map(s => `${s.name}: ${s.description}`)
+    const texts = rows.map(r => [
+      r.name,
+      r.description ?? '',
+      r.raw_bonus ? `bônus: ${r.raw_bonus}` : '',
+    ].filter(Boolean).join('. '))
+
     const embeddings = await getEmbeddings(texts)
 
-    // Update each skill with its embedding
     let updated = 0
     const errors: string[] = []
-
-    for (let i = 0; i < skills.length; i++) {
-      const { error: updateError } = await supabase
-        .from('skills')
-        .update({ embedding: embeddings[i] } as any)
-        .eq('id', skills[i].id)
-
-      if (updateError) {
-        errors.push(`${skills[i].id}: ${updateError.message}`)
-      } else {
-        updated++
-      }
+    for (let i = 0; i < rows.length; i++) {
+      const { error: e } = await supabase.from('items').update({ embedding: embeddings[i] } as any).eq('id', rows[i].id)
+      if (e) errors.push(`${rows[i].id}: ${e.message}`)
+      else updated++
     }
 
-    const { count } = await supabase
-      .from('skills')
-      .select('id', { count: 'exact', head: true })
-      .is('embedding', null)
-
+    const { count } = await supabase.from('items').select('id', { count: 'exact', head: true }).is('embedding', null)
     return res.status(200).json({
-      ok: true,
-      done: (count ?? 0) === 0,
-      embedded: updated,
-      remaining: count ?? 0,
-      errors: errors.length > 0 ? errors : undefined,
-      message: `Batch: ${updated}/${skills.length} embeddings gerados. Restando: ${count ?? 0}`,
+      ok: true, done: (count ?? 0) === 0, table, embedded: updated,
+      remaining: count ?? 0, errors: errors.length ? errors : undefined,
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
