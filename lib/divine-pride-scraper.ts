@@ -17,7 +17,7 @@ const FUNCTION_TO_STAT: Record<number, string> = {
   12:  'hit',   14:  'crit',
   // HP/SP
   7:   'hp',    8:   'sp',
-  // Dano por tamanho
+  // Dano por tamanho (base — pode ser sobrescrito por resolveStatFromDescription)
   812: 'magical_dmg_size',
   // Dano elemental
   55:  'dmg_element',
@@ -25,6 +25,21 @@ const FUNCTION_TO_STAT: Record<number, string> = {
   182: 'fixed_cast_reduction',
   183: 'variable_cast_reduction',
 };
+
+/**
+ * Para certos function IDs, o stat depende do conteudo da descricao.
+ * Ex: fn=812 pode ser Small, Medium ou Large.
+ */
+function resolveStatFromDescription(fnId: number, description: string): string {
+  if (fnId === 812) {
+    const desc = description.toLowerCase();
+    if (desc.includes('small'))  return 'magical_dmg_size_small';
+    if (desc.includes('medium')) return 'magical_dmg_size_medium';
+    if (desc.includes('large'))  return 'magical_dmg_size_large';
+    return 'magical_dmg_size'; // fallback generico
+  }
+  return FUNCTION_TO_STAT[fnId] ?? `fn_${fnId}`;
+}
 
 export interface ScrapedBonus {
   stat:        string;
@@ -66,14 +81,16 @@ export async function scrapeItemBonuses(itemId: string): Promise<ScrapedBonus[]>
   $('legend:not(.entry-title)').each((_, legend) => {
     if (!$(legend).text().trim().includes('Scripts')) return;
 
-    // O ul eirmao da legend dentro do mesmo div pai
+    // O ul irmao da legend dentro do mesmo div pai
     $(legend).parent().find('ul li').each((_, li) => {
       const $li         = $(li);
       const description = $li.text().trim();
       const href        = $li.find('a').attr('href') ?? '';
       const fnMatch     = href.match(/function=(\d+)/);
       const fnId        = fnMatch ? parseInt(fnMatch[1]) : 0;
-      const stat        = FUNCTION_TO_STAT[fnId] ?? `fn_${fnId}`;
+
+      // Resolve stat considerando o conteudo da descricao (ex: Small/Medium/Large)
+      const stat = resolveStatFromDescription(fnId, description);
 
       // Extrai valores numericos dos badges
       const values: string[] = [];
