@@ -37,7 +37,7 @@ export type Database = {
           element?: string | null
           max_level: number
           description: string
-          job_id: string
+          job_id?: string
           requires?: Json
           embedding?: unknown
         }
@@ -82,6 +82,123 @@ export type Database = {
           expanded?: boolean
         }
       }
+      items: {
+        Row: {
+          id: string
+          name: string
+          type: number | null
+          sub_type: number | null
+          slots: number
+          weight: number | null
+          description: string | null
+          raw_bonus: string | null
+          dp_data: Json | null
+          source: string | null
+          created_at: string | null
+          embedding: unknown
+        }
+        Insert: {
+          id: string
+          name: string
+          type?: number | null
+          sub_type?: number | null
+          slots?: number
+          weight?: number | null
+          description?: string | null
+          raw_bonus?: string | null
+          dp_data?: Json | null
+          source?: string | null
+          embedding?: unknown
+        }
+        Update: {
+          id?: string
+          name?: string
+          type?: number | null
+          sub_type?: number | null
+          slots?: number
+          weight?: number | null
+          description?: string | null
+          raw_bonus?: string | null
+          dp_data?: Json | null
+          source?: string | null
+          embedding?: unknown
+        }
+      }
+      item_bonuses: {
+        Row: {
+          id: number
+          item_id: string
+          stat: string
+          value: number
+          condition: string
+          job_id: string | null
+          skill_mod: string | null
+          is_card: boolean | null
+        }
+        Insert: {
+          item_id: string
+          stat: string
+          value: number
+          condition: string
+          job_id?: string | null
+          skill_mod?: string | null
+          is_card?: boolean | null
+        }
+        Update: {
+          item_id?: string
+          stat?: string
+          value?: number
+          condition?: string
+          job_id?: string | null
+          skill_mod?: string | null
+          is_card?: boolean | null
+        }
+      }
+      item_skill_mods: {
+        Row: {
+          id: number
+          item_id: string
+          skill_id: string
+          mod_type: string
+          mod_value: number
+        }
+        Insert: {
+          item_id: string
+          skill_id: string
+          mod_type: string
+          mod_value: number
+        }
+        Update: {
+          item_id?: string
+          skill_id?: string
+          mod_type?: string
+          mod_value?: number
+        }
+      }
+      item_combos: {
+        Row: {
+          id: number
+          name: string
+          item_ids: string[]
+          bonus_stat: string | null
+          bonus_value: number | null
+          description: string | null
+        }
+        Insert: {
+          name: string
+          item_ids: string[]
+          bonus_stat?: string | null
+          bonus_value?: number | null
+          description?: string | null
+        }
+        Update: {
+          name?: string
+          item_ids?: string[]
+          bonus_stat?: string | null
+          bonus_value?: number | null
+          description?: string | null
+        }
+      }
     }
     Views: Record<string, never>
     Functions: {
@@ -93,6 +210,19 @@ export type Database = {
           filter_job_id?: string | null
         }
         Returns: MatchSkillsRow[]
+      }
+      match_items: {
+        Args: {
+          query_embedding: number[]
+          match_count: number
+          match_threshold?: number
+        }
+        Returns: {
+          id: string
+          name: string
+          description: string | null
+          similarity: number
+        }[]
       }
     }
     Enums: Record<string, never>
