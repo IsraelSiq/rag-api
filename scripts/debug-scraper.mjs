@@ -7,21 +7,21 @@ const res = await fetch('https://www.divine-pride.net/database/item/19499', {
 const html = await res.text();
 const $ = cheerio.load(html);
 
-$('legend').each((i, el) => {
-  if ($(el).text().trim() !== 'Scripts') return;
-
-  console.log('--- Scripts legend encontrada ---');
-  const parent = $(el).parent();
-  console.log('parent tag:', parent.get(0).tagName);
-  console.log('parent html (500 chars):');
-  console.log($.html(parent).substring(0, 500));
-
-  console.log('\nsiblings:', $(el).siblings().map((i, s) => s.tagName).get());
-  console.log('siblings ul:', $(el).siblings('ul').length);
-  console.log('parent find ul:', parent.find('ul').length);
-  console.log('parent find li:', parent.find('li').length);
-
-  parent.find('li').each((i, li) => {
-    console.log(`li ${i}:`, $(li).text().trim().substring(0, 100));
-  });
+// Testa exatamente o seletor do scraper corrigido
+console.log('=== legend:not(.entry-title) ===');
+const legends = $('legend:not(.entry-title)');
+console.log('count:', legends.length);
+legends.each((i, el) => {
+  const text = $(el).text().trim();
+  console.log(`[${i}] text: "${text}"`);
+  console.log(`[${i}] includes Scripts:`, text.includes('Scripts'));
+  if (text.includes('Scripts')) {
+    const lis = $(el).parent().find('ul li');
+    console.log(`  -> lis encontrados:`, lis.length);
+    lis.each((j, li) => {
+      const href = $(li).find('a').attr('href') ?? 'sem href';
+      const fn = href.match(/function=(\d+)/);
+      console.log(`  li[${j}] fn=${fn ? fn[1] : 'none'}: ${$(li).text().trim().substring(0, 80)}`);
+    });
+  }
 });
