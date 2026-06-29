@@ -3,13 +3,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getSupabase } from '../lib/supabase'
 import { cors, handleOptions } from '../lib/helpers'
 
-const BATCH_SIZE = 20
+const BATCH_SIZE = 96 // Cohere supports up to 96 texts per call
 
-async function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-async function getEmbedding(text: string): Promise<number[]> {
+async function getEmbeddings(texts: string[]): Promise<number[][]> {
   const res = await fetch('https://api.cohere.com/v2/embed', {
     method: 'POST',
     headers: {
@@ -18,7 +14,7 @@ async function getEmbedding(text: string): Promise<number[]> {
     },
     body: JSON.stringify({
       model: 'embed-multilingual-v3.0',
-      texts: [text],
+      texts,
       input_type: 'search_document',
       embedding_types: ['float'],
     }),
@@ -28,7 +24,7 @@ async function getEmbedding(text: string): Promise<number[]> {
     throw new Error(`Cohere error: ${err}`)
   }
   const json = await res.json()
-  return json.embeddings.float[0]
+  return json.embeddings.float
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -64,27 +60,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true, done: true, message: 'Todos os embeddings já foram gerados!' })
     }
 
+    // Build texts array and call Cohere once for all
+    const texts = skills.map(s => `${s.name}: ${s.description}`)
+    const embeddings = await getEmbeddings(texts)
+
+    // Update each skill with its embedding
     let updated = 0
     const errors: string[] = []
 
-    for (const skill of skills) {
-      try {
-        const text = `${skill.name}: ${skill.description}`
-        const embedding = await getEmbedding(text)
+    for (let i = 0; i < skills.length; i++) {
+      const { error: updateError } = await supabase
+        .from('skills')
+        .update({ embedding: embeddings[i] } as any)
+        .eq('id', skills[i].id)
 
-        const { error: updateError } = await supabase
-          .from('skills')
-          .update({ embedding } as any)
-          .eq('id', skill.id)
-
-        if (updateError) {
-          errors.push(`${skill.id}: ${updateError.message}`)
-        } else {
-          updated++
-        }
-        await sleep(50)
-      } catch (e: unknown) {
-        errors.push(`${skill.id}: ${e instanceof Error ? e.message : 'unknown'}`)
+      if (updateError) {
+        errors.push(`${skills[i].id}: ${updateError.message}`)
+      } else {
+        updated++
       }
     }
 
