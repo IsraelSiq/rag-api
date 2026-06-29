@@ -1,5 +1,30 @@
+// @ts-nocheck
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { cors } from '../lib/helpers'
+
+const swaggerHtml = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>RO Skill Simulator API — Docs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: '/api/docs?json=1',
+      dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: 'BaseLayout',
+      deepLinking: true,
+      tryItOutEnabled: true,
+    })
+  <\/script>
+</body>
+</html>`
 
 const spec = {
   openapi: '3.0.0',
@@ -38,7 +63,13 @@ const spec = {
   },
 }
 
-export default function handler(_req: VercelRequest, res: VercelResponse) {
+export default function handler(req: VercelRequest, res: VercelResponse) {
   cors(res)
-  return res.status(200).json(spec)
+  // Serve JSON spec when ?json=1 or Accept: application/json
+  if (req.query.json || (req.headers.accept ?? '').includes('application/json')) {
+    return res.status(200).json(spec)
+  }
+  // Default: serve Swagger UI
+  res.setHeader('Content-Type', 'text/html')
+  return res.status(200).send(swaggerHtml)
 }

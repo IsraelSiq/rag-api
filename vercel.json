@@ -9,7 +9,7 @@
     { "source": "/api/embed", "destination": "/api/embed" },
     { "source": "/api/seed", "destination": "/api/seed" },
     { "source": "/api/docs", "destination": "/api/docs" },
-    { "source": "/api/swagger", "destination": "/api/swagger" }
+    { "source": "/api/swagger", "destination": "/api/docs" }
   ],
   "headers": [
     {
@@ -17,7 +17,7 @@
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+        { "key": "+Access-Control-Allow-Headers", "value": "Content-Type" }
       ]
     }
   ]
