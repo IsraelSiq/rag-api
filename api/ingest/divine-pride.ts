@@ -11,9 +11,17 @@ import { cors, handleOptions } from '../../lib/helpers'
 import { fetchItem, fetchItemsByType, getBonusScript, type DPItemType } from '../../lib/divine-pride'
 import { parseBonusScript } from '../../lib/bonus-parser'
 
+type ItemBonusInsert = {
+  item_id:   string
+  stat:      string
+  value:     number
+  condition: string
+  job_id:    string | null
+  skill_mod: string | null
+}
+
 function authCheck(req: VercelRequest): boolean {
   const secret = process.env.CRON_SECRET
-  // Em dev (sem CRON_SECRET), permite livre acesso
   if (!secret) return true
   return req.headers['x-cron-secret'] === secret
 }
@@ -34,7 +42,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabase = getSupabase()
 
   try {
-    // Resolve lista de IDs a processar
     let itemIds: number[] = []
 
     if (ids && ids.length > 0) {
@@ -64,7 +71,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue
         }
 
-        // Upsert na tabela items
         const { error: upsertErr } = await supabase.from('items').upsert({
           id:          String(id),
           name:        dpItem.name,
@@ -80,24 +86,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (upsertErr) { report.errors.push(`#${id}: ${upsertErr.message}`); continue }
 
-        // Reconstrói os bônus: deleta antigos e insere novos
         if (bonuses.length > 0) {
           await supabase.from('item_bonuses').delete().eq('item_id', String(id))
-          await supabase.from('item_bonuses').insert(
-            bonuses.map(b => ({
-              item_id:   String(id),
-              stat:      b.stat,
-              value:     b.value,
-              condition: b.condition,
-              job_id:    b.job_id ?? null,
-              skill_mod: b.skill_mod ?? null,
-            }))
-          )
+
+          const rows: ItemBonusInsert[] = bonuses.map(b => ({
+            item_id:   String(id),
+            stat:      b.stat,
+            value:     b.value,
+            condition: b.condition,
+            job_id:    b.job_id ?? null,
+            skill_mod: b.skill_mod ?? null,
+          }))
+
+          await supabase.from('item_bonuses').insert(rows as unknown as Record<string, unknown>[])
         }
 
         report.inserted++
 
-        // Rate limit: 1 req/s para não sobrecarregar a API
         await new Promise(r => setTimeout(r, 1000))
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)

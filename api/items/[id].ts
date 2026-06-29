@@ -34,26 +34,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ error: 'Item not found' })
     }
 
-    // Busca combos que contenham este item
+    const item = itemRes.data as Record<string, unknown>
+
     const { data: combos } = await supabase
       .from('item_combos')
       .select('name, item_ids, bonus_stat, bonus_value, description')
       .contains('item_ids', [id])
 
-    // Calcula sumário de bônus (potencial máximo por stat)
     const bonusSummary: Record<string, number> = {}
-    for (const b of bonusRes.data ?? []) {
+    const bonusData = (bonusRes.data ?? []) as Array<{ stat: string; value: number; condition: string | null }>
+    for (const b of bonusData) {
       if (b.condition === 'always' || b.condition === null) {
         bonusSummary[b.stat] = (bonusSummary[b.stat] ?? 0) + b.value
       }
     }
 
     return res.status(200).json({
-      ...itemRes.data,
-      bonuses: bonusRes.data ?? [],
+      ...item,
+      bonuses:       bonusRes.data   ?? [],
       bonus_summary: bonusSummary,
-      skill_mods: skillModRes.data ?? [],
-      combos: combos ?? [],
+      skill_mods:    skillModRes.data ?? [],
+      combos:        combos           ?? [],
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
